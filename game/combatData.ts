@@ -1,0 +1,253 @@
+import type { CharacterClassName } from './gameData';
+
+export type CombatVfx = 'steel' | 'arcane' | 'chi' | 'arrow';
+
+export type CoreCombatAction = {
+  id: 'quick' | 'power' | 'focus';
+  name: string;
+  icon: string;
+  damageMin: number;
+  damageMax: number;
+  statScaling: number;
+  healing: number;
+  energyCost: number;
+  energyGain: number;
+  guardPercent: number;
+  partyMultiplier: number;
+  color: string;
+  vfx: CombatVfx;
+  vfxGlyph: string;
+  synergySkillIds: readonly string[];
+};
+
+export type ClassCombatKit = {
+  identity: string;
+  actions: readonly [CoreCombatAction, CoreCombatAction, CoreCombatAction];
+};
+
+export const CLASS_COMBAT_KITS: Record<CharacterClassName, ClassCombatKit> = {
+  Warrior: {
+    identity: 'Guard pressure · heavy finishers',
+    actions: [
+      {
+        id: 'quick',
+        name: 'Vanguard Slash',
+        icon: '⚔️',
+        damageMin: 160,
+        damageMax: 220,
+        statScaling: 4,
+        healing: 0,
+        energyCost: 0,
+        energyGain: 18,
+        guardPercent: 0.08,
+        partyMultiplier: 1,
+        color: '#FF7A6E',
+        vfx: 'steel',
+        vfxGlyph: '╱',
+        synergySkillIds: ['warrior-heavy-hand', 'warrior-adrenaline'],
+      },
+      {
+        id: 'power',
+        name: 'Earthsplitter',
+        icon: '💥',
+        damageMin: 305,
+        damageMax: 400,
+        statScaling: 7,
+        healing: 0,
+        energyCost: 30,
+        energyGain: 0,
+        guardPercent: 0.18,
+        partyMultiplier: 1.25,
+        color: '#FFB05C',
+        vfx: 'steel',
+        vfxGlyph: '╳',
+        synergySkillIds: ['warrior-heavy-hand', 'warrior-adrenaline'],
+      },
+      {
+        id: 'focus',
+        name: 'Fortress Stance',
+        icon: '🛡️',
+        damageMin: 0,
+        damageMax: 0,
+        statScaling: 0,
+        healing: 75,
+        energyCost: 0,
+        energyGain: 25,
+        guardPercent: 0.45,
+        partyMultiplier: 0,
+        color: '#78A7FF',
+        vfx: 'steel',
+        vfxGlyph: '⬡',
+        synergySkillIds: ['warrior-iron-will', 'warrior-second-wind'],
+      },
+    ],
+  },
+  Scholar: {
+    identity: 'Arcane range · rapid energy control',
+    actions: [
+      {
+        id: 'quick',
+        name: 'Rune Volley',
+        icon: '✦',
+        damageMin: 165,
+        damageMax: 235,
+        statScaling: 5,
+        healing: 0,
+        energyCost: 0,
+        energyGain: 22,
+        guardPercent: 0,
+        partyMultiplier: 1,
+        color: '#73D9FF',
+        vfx: 'arcane',
+        vfxGlyph: '✦',
+        synergySkillIds: ['scholar-flow-state'],
+      },
+      {
+        id: 'power',
+        name: 'Aether Lance',
+        icon: '🔷',
+        damageMin: 320,
+        damageMax: 420,
+        statScaling: 8,
+        healing: 0,
+        energyCost: 30,
+        energyGain: 0,
+        guardPercent: 0,
+        partyMultiplier: 1.2,
+        color: '#9B83FF',
+        vfx: 'arcane',
+        vfxGlyph: '◆',
+        synergySkillIds: ['scholar-exploit-weakness', 'scholar-flow-state'],
+      },
+      {
+        id: 'focus',
+        name: 'Astral Insight',
+        icon: '🧠',
+        damageMin: 0,
+        damageMax: 0,
+        statScaling: 0,
+        healing: 90,
+        energyCost: 0,
+        energyGain: 35,
+        guardPercent: 0.1,
+        partyMultiplier: 0,
+        color: '#69E6D3',
+        vfx: 'arcane',
+        vfxGlyph: '◎',
+        synergySkillIds: ['scholar-mental-reserve', 'scholar-calculated-defense'],
+      },
+    ],
+  },
+  Monk: {
+    identity: 'Restoration · flowing counterattacks',
+    actions: [
+      {
+        id: 'quick',
+        name: 'Flowing Fist',
+        icon: '👊',
+        damageMin: 145,
+        damageMax: 205,
+        statScaling: 4,
+        healing: 30,
+        energyCost: 0,
+        energyGain: 18,
+        guardPercent: 0.1,
+        partyMultiplier: 1,
+        color: '#D39BFF',
+        vfx: 'chi',
+        vfxGlyph: '◉',
+        synergySkillIds: ['monk-flowing-form', 'monk-compassion'],
+      },
+      {
+        id: 'power',
+        name: 'Dragon Palm',
+        icon: '🐉',
+        damageMin: 275,
+        damageMax: 360,
+        statScaling: 6,
+        healing: 50,
+        energyCost: 25,
+        energyGain: 0,
+        guardPercent: 0.25,
+        partyMultiplier: 1.15,
+        color: '#FF96D2',
+        vfx: 'chi',
+        vfxGlyph: '☯',
+        synergySkillIds: ['monk-flowing-form', 'monk-stone-stance'],
+      },
+      {
+        id: 'focus',
+        name: 'Centering Breath',
+        icon: '🪷',
+        damageMin: 0,
+        damageMax: 0,
+        statScaling: 0,
+        healing: 145,
+        energyCost: 0,
+        energyGain: 25,
+        guardPercent: 0.3,
+        partyMultiplier: 0,
+        color: '#73E5B2',
+        vfx: 'chi',
+        vfxGlyph: '◌',
+        synergySkillIds: ['monk-deep-breath', 'monk-compassion'],
+      },
+    ],
+  },
+  Ranger: {
+    identity: 'Multi-hit volleys · efficient momentum',
+    actions: [
+      {
+        id: 'quick',
+        name: 'Quickdraw Volley',
+        icon: '🏹',
+        damageMin: 175,
+        damageMax: 240,
+        statScaling: 5,
+        healing: 0,
+        energyCost: 0,
+        energyGain: 24,
+        guardPercent: 0.04,
+        partyMultiplier: 1.05,
+        color: '#64E6A3',
+        vfx: 'arrow',
+        vfxGlyph: '➶',
+        synergySkillIds: ['ranger-eagle-eye', 'ranger-momentum'],
+      },
+      {
+        id: 'power',
+        name: 'Piercing Shot',
+        icon: '🎯',
+        damageMin: 300,
+        damageMax: 395,
+        statScaling: 7,
+        healing: 0,
+        energyCost: 28,
+        energyGain: 0,
+        guardPercent: 0.08,
+        partyMultiplier: 1.3,
+        color: '#B8E96A',
+        vfx: 'arrow',
+        vfxGlyph: '➵',
+        synergySkillIds: ['ranger-eagle-eye', 'ranger-momentum'],
+      },
+      {
+        id: 'focus',
+        name: 'Field Remedy',
+        icon: '🌿',
+        damageMin: 0,
+        damageMax: 0,
+        statScaling: 0,
+        healing: 105,
+        energyCost: 0,
+        energyGain: 30,
+        guardPercent: 0.15,
+        partyMultiplier: 0,
+        color: '#67D7B1',
+        vfx: 'arrow',
+        vfxGlyph: '✣',
+        synergySkillIds: ['ranger-fleet-foot', 'ranger-survivalist'],
+      },
+    ],
+  },
+};

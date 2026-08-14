@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "Ascend",
+    "slug": "ascend",
+    "version": "1.0.0",
+    "description": "A fitness RPG that turns healthy habits into character progression.",
+    "scheme": "ascend",
+    "primaryColor": "#635BFF",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/ascend-app-icon-v1.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0D14",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/ascend-adaptive-icon-v1.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0D14"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.ascendfitness.mobile",
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.ascendfitness.mobile",
+      "versionCode": 1,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/ascend-adaptive-icon-v1.png",
+        "backgroundColor": "#02051A"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/ascend-favicon-v1.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d8f64661-343c-49b7-9555-2bf3b9f3c3fa"
+      }
+    },
+    "owner": "cageh45"
+  }
+}

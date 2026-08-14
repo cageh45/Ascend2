@@ -1,0 +1,137 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsigned-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-unsigned-ipa:
+    name: Build Ascend for external signing
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      EXPO_NO_TELEMETRY: "1"
+      COCOAPODS_DISABLE_STATS: "true"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Generate the native iOS project
+        run: npx expo prebuild --platform ios --no-install --clean
+
+      - name: Verify generated HealthKit configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          entitlements="ios/Ascend/Ascend.entitlements"
+          info_plist="ios/Ascend/Info.plist"
+
+          test -f "$entitlements"
+          test -f "$info_plist"
+
+          healthkit="$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.developer.healthkit' "$entitlements")"
+          usage_description="$('/usr/libexec/PlistBuddy' -c 'Print :NSHealthShareUsageDescription' "$info_plist")"
+
+          test "$healthkit" = "true"
+          test -n "$usage_description"
+
+          if '/usr/libexec/PlistBuddy' -c 'Print :com.apple.developer.healthkit.background-delivery' "$entitlements" >/dev/null 2>&1; then
+            echo "Unexpected HealthKit background-delivery entitlement in read-only build." >&2
+            exit 1
+          fi
+
+          if '/usr/libexec/PlistBuddy' -c 'Print :NSHealthUpdateUsageDescription' "$info_plist" >/dev/null 2>&1; then
+            echo "Unexpected HealthKit write usage description in read-only build." >&2
+            exit 1
+          fi
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      - name: Build unsigned physical-device Release app
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build
+
+          xcodebuild \
+            -workspace ios/Ascend.xcworkspace \
+            -scheme Ascend \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            DEVELOPMENT_TEAM= \
+            clean build \
+            | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA and signing entitlements
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          products="build/DerivedData/Build/Products/Release-iphoneos"
+          app_path="$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)"
+
+          if [[ -z "$app_path" ]]; then
+            echo "No Release iPhoneOS .app was produced." >&2
+            exit 1
+          fi
+
+          mkdir -p build/unsigned-ipa/Payload
+          ditto "$app_path" build/unsigned-ipa/Payload/Ascend.app
+          cp ios/Ascend/Ascend.entitlements build/unsigned-ipa/Ascend.entitlements
+
+          (
+            cd build/unsigned-ipa
+            /usr/bin/zip -qry Ascend.ipa Payload
+          )
+
+          test -s build/unsigned-ipa/Ascend.ipa
+          shasum -a 256 build/unsigned-ipa/Ascend.ipa \
+            | tee build/unsigned-ipa/Ascend.ipa.sha256
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ascend-unsigned-ios-${{ github.run_number }}
+          path: |
+            build/unsigned-ipa/Ascend.ipa
+            build/unsigned-ipa/Ascend.ipa.sha256
+            build/unsigned-ipa/Ascend.entitlements
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
