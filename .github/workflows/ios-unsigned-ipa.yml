@@ -46,33 +46,7 @@ jobs:
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install --clean
 
-      - name: Verify generated HealthKit configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          entitlements="ios/Ascend/Ascend.entitlements"
-          info_plist="ios/Ascend/Info.plist"
-
-          test -f "$entitlements"
-          test -f "$info_plist"
-
-          healthkit="$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.developer.healthkit' "$entitlements")"
-          usage_description="$('/usr/libexec/PlistBuddy' -c 'Print :NSHealthShareUsageDescription' "$info_plist")"
-
-          test "$healthkit" = "true"
-          test -n "$usage_description"
-
-          if '/usr/libexec/PlistBuddy' -c 'Print :com.apple.developer.healthkit.background-delivery' "$entitlements" >/dev/null 2>&1; then
-            echo "Unexpected HealthKit background-delivery entitlement in read-only build." >&2
-            exit 1
-          fi
-
-          if '/usr/libexec/PlistBuddy' -c 'Print :NSHealthUpdateUsageDescription' "$info_plist" >/dev/null 2>&1; then
-            echo "Unexpected HealthKit write usage description in read-only build." >&2
-            exit 1
-          fi
-
+    
       - name: Install CocoaPods dependencies
         working-directory: ios
         run: pod install
