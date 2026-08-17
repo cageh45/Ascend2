@@ -39,12 +39,24 @@ import {
   tickCooldowns,
 } from '../game/combatBalance';
 import {
+  ClassCombatStatus,
+  EMPTY_CLASS_STATUS,
+  getClassMechanicName,
+  resolveClassAction,
+  tickClassStatusAfterBossTurn,
+} from '../game/classCombatMechanics';
+import {
   DUNGEONS,
   DungeonDefinition,
   DungeonId,
   DungeonRoom,
   getDungeon,
 } from '../game/dungeonData';
+import {
+  DUNGEON_BOONS,
+  DungeonBoon,
+  getDungeonAffix,
+} from '../game/dungeonModifiers';
 import {
   CHARACTER_CLASSES,
   getEffectiveAttributePower,
@@ -69,6 +81,7 @@ import {
 } from '../game/musicData';
 import { useMusic } from '../state/MusicContext';
 import GameIcon from '../components/GameIcon';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type BattleOutcome = 'fighting' | 'victory' | 'defeat';
 type DungeonRunPhase = 'selection' | 'room' | 'traveling' | 'complete';
@@ -135,6 +148,7 @@ function getDungeonCombatant(
 }
 
 export default function RaidScreen() {
+  const reduceMotion = useReducedMotion();
   const {
     appearanceId,
     characterClass,
@@ -142,7 +156,7 @@ export default function RaidScreen() {
     claimRaidVictory,
     completedDungeonIds,
     equippedGearSetId,
-    raidRewardAvailable,
+    isRaidRewardAvailable,
     raidWins,
     markDungeonComplete,
     stats,
@@ -151,10 +165,12 @@ export default function RaidScreen() {
   } = useGame();
   const { user } = useAuth();
   const {
+    claimVerifiedRaidReward,
     createRaid,
     launchRaid,
     onlineRaid,
     party,
+    performRaidAction,
     reportRaidResult,
     setRaidReady,
   } = useSocial();
@@ -173,6 +189,8 @@ export default function RaidScreen() {
   const [readyMemberIds, setReadyMemberIds] = useState<string[]>([]);
   const [readyCheckActive, setReadyCheckActive] = useState(false);
   const dungeon = getDungeon(selectedDungeonId);
+  const dungeonAffix = getDungeonAffix(dungeon.id);
+  const raidRewardAvailable = isRaidRewardAvailable(dungeon.id);
   const room = dungeon.rooms[roomIndex];
   const boss = getDungeonCombatant(dungeon, room);
   const partyMembers = party?.members.filter((member) => member.id !== user?.id) ?? [];
@@ -221,8 +239,11 @@ export default function RaidScreen() {
     skillBonuses.maxHp +
     equippedGear.maxHpBonus,
   );
-  const bossMaxHp =
-    Math.round(boss.maxHp * (partyRaidActive ? 1.35 : 1));
+  const bossMaxHp = Math.round(
+    partyRaidActive && onlineRaid?.bossMaxHp
+      ? onlineRaid.bossMaxHp
+      : boss.maxHp * dungeonAffix.hpMultiplier,
+  );
   const selectedPartyRaidLevelReady =
     level >= getDungeon(selectedPartyRaidId).recommendedLevel;
   const startingEnergy = Math.min(
@@ -238,6 +259,10 @@ export default function RaidScreen() {
   const [bossShield, setBossShield] = useState(0);
   const [stagger, setStagger] = useState(0);
   const [combo, setCombo] = useState(0);
+  const [classStatus, setClassStatus] =
+    useState<ClassCombatStatus>(EMPTY_CLASS_STATUS);
+  const [runDamageBonus, setRunDamageBonus] = useState(0);
+  const [runGuardBonus, setRunGuardBonus] = useState(0);
   const [lastDamageActionId, setLastDamageActionId] = useState<string | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const [turnLocked, setTurnLocked] = useState(false);
@@ -279,6 +304,7 @@ export default function RaidScreen() {
   });
 
   const mounted = useRef(true);
+  const finalVictoryInFlight = useRef(false);
   const previousMaxHp = useRef(playerMaxHp);
   const previousStartingEnergy = useRef(startingEnergy);
   const heroX = useRef(new Animated.Value(0)).current;
@@ -305,6 +331,15 @@ export default function RaidScreen() {
   const travelPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    mounted.current = true;
+    if (reduceMotion) {
+      heroY.setValue(0);
+      bossY.setValue(0);
+      return () => {
+        mounted.current = false;
+      };
+    }
+
     if (isFocused) playTrack(musicTrack);
   }, [isFocused, musicTrack, playTrack]);
 
@@ -326,6 +361,14 @@ export default function RaidScreen() {
       enterPartyRaid(raidDungeonId);
     }
   }, [onlineRaid, partyRaidActive, runPhase]);
+
+  useEffect(() => {
+    if (!partyRaidActive || !onlineRaid) return;
+    setBossHp(onlineRaid.bossHp);
+    if (onlineRaid.state === 'victory' && outcome === 'fighting') {
+      void completeVictory('The party’s synchronized assault finished the raid!');
+    }
+  }, [onlineRaid?.bossHp, onlineRaid?.state, partyRaidActive]);
 
   useEffect(() => {
     const heroIdle = Animated.loop(
@@ -375,9 +418,15 @@ export default function RaidScreen() {
       heroShake.stopAnimation();
       bossShake.stopAnimation();
     };
-  }, [bossShake, bossX, bossY, heroShake, heroX, heroY]);
+  }, [bossShake, bossX, bossY, heroShake, heroX, heroY, reduceMotion]);
 
   useEffect(() => {
+    if (reduceMotion) {
+      walkingX.setValue(0);
+      travelPulse.setValue(0);
+      return;
+    }
+
     const walking = Animated.loop(
       Animated.sequence([
         Animated.timing(walkingX, {
@@ -415,7 +464,7 @@ export default function RaidScreen() {
       walking.stop();
       pulsing.stop();
     };
-  }, [travelPulse, walkingX]);
+  }, [reduceMotion, travelPulse, walkingX]);
 
   useEffect(() => {
     setPlayerHp((current) =>
@@ -456,7 +505,7 @@ export default function RaidScreen() {
 
   function getCoreDamageRange(action: CoreCombatAction) {
     const multiplier =
-      1 + skillBonuses.damageBonus + equippedGear.damageBonus;
+      1 + skillBonuses.damageBonus + equippedGear.damageBonus + runDamageBonus;
     return {
       min: Math.round(
         (action.damageMin +
@@ -547,7 +596,7 @@ export default function RaidScreen() {
     return Math.round(assist * (partyRaidActive ? 1.2 : 1));
   }
 
-  function completeVictory(finisher: string) {
+  async function completeVictory(finisher: string) {
     if (!boss.isFinalBoss) {
       setOutcome('victory');
       setStatus(`${boss.name} has been defeated. The path ahead is open.`);
@@ -559,12 +608,30 @@ export default function RaidScreen() {
       return;
     }
 
-    const earnedReward = partyRaidActive
-      ? false
-      : claimRaidVictory(boss.name, boss.rewardXp);
+    if (finalVictoryInFlight.current) return;
+    finalVictoryInFlight.current = true;
+
+    const modifiedRewardXp = Math.round(
+      (boss.rewardXp * dungeonAffix.rewardMultiplier) / 5,
+    ) * 5;
+    let earnedReward = false;
+    let awardedXp = modifiedRewardXp;
     if (partyRaidActive) {
-      void reportRaidResult('victory', 0);
+      const verifiedReward = await claimVerifiedRaidReward();
+      awardedXp = verifiedReward?.rewardXp ?? 0;
+      if (verifiedReward?.serverVerified && awardedXp > 0) {
+        earnedReward = claimRaidVictory(
+          dungeon.id,
+          `${boss.name} co-raid`,
+          awardedXp,
+        );
+      }
     } else {
+      earnedReward = claimRaidVictory(
+        dungeon.id,
+        boss.name,
+        modifiedRewardXp,
+      );
       markDungeonComplete(dungeon.id);
     }
     setVictoryRewardEarned(earnedReward);
@@ -577,9 +644,11 @@ export default function RaidScreen() {
     );
     addLog(
       partyRaidActive
-        ? `${finisher} Only server-verified combat can award online raid XP.`
+        ? earnedReward
+          ? `${finisher} Server-verified co-raid reward: +${awardedXp} XP!`
+          : `${finisher} This raid’s co-op reward was already claimed today.`
         : earnedReward
-        ? `${finisher} Victory reward: +${boss.rewardXp} XP!`
+        ? `${finisher} Victory reward: +${modifiedRewardXp} XP!`
         : `${finisher} Practice victory complete.`,
     );
     void Haptics.notificationAsync(
@@ -823,7 +892,22 @@ export default function RaidScreen() {
     );
   }
 
-  async function bossTurn(currentPlayerHp: number, guardPercent = 0) {
+  async function bossTurn(
+    currentPlayerHp: number,
+    guardPercent = 0,
+    statusAfterAction = classStatus,
+    currentBossHp = bossHp,
+  ) {
+    if (statusAfterAction.id === 'bleed' && !partyRaidActive) {
+      const bleedHp = Math.max(0, currentBossHp - statusAfterAction.potency);
+      setBossHp(bleedHp);
+      addLog(`REND tears ${boss.name} for ${statusAfterAction.potency} damage.`);
+      if (bleedHp === 0) {
+        setClassStatus(EMPTY_CLASS_STATUS);
+        void completeVictory('Rend finished the raid!');
+        return;
+      }
+    }
     setStatus(`${boss.name} uses ${bossIntent.name}…`);
     await wait(300);
     if (!mounted.current) return;
@@ -836,11 +920,17 @@ export default function RaidScreen() {
         rawDamage *
           bossIntent.damageMultiplier *
           getBossPhaseAttackMultiplier(bossPhase) *
+          dungeonAffix.attackMultiplier *
           (1 - Math.min(0.45, skillBonuses.damageReduction)) *
-          (1 - effectiveGuard),
+          (1 - Math.min(0.65, effectiveGuard + runGuardBonus)),
       ),
     );
-    const nextPlayerHp = Math.max(0, currentPlayerHp - damage);
+    const renewal =
+      statusAfterAction.id === 'renewal' ? statusAfterAction.potency : 0;
+    const nextPlayerHp = Math.min(
+      playerMaxHp,
+      Math.max(0, currentPlayerHp - damage) + renewal,
+    );
     await animateBossAttack(damage);
     if (!mounted.current) return;
 
@@ -865,6 +955,8 @@ export default function RaidScreen() {
           : ''
       }.`,
     );
+    if (renewal > 0) addLog(`RENEWAL restores ${renewal} HP after the hit.`);
+    setClassStatus(tickClassStatusAfterBossTurn(statusAfterAction));
     setBossTurnNumber((current) => current + 1);
 
     if (nextPlayerHp === 0) {
@@ -897,18 +989,53 @@ export default function RaidScreen() {
       return;
     }
 
+    if (partyRaidActive) setTurnLocked(true);
+    const verifiedAction = partyRaidActive
+      ? await performRaidAction(action.id)
+      : null;
+    if (partyRaidActive && !verifiedAction) {
+      setTurnLocked(false);
+      setStatus('The raid server rejected the action. Reconnect and try again.');
+      return;
+    }
+
     const damageRange = getCoreDamageRange(action);
+    const mechanic = resolveClassAction(
+      characterClass,
+      action,
+      classStatus,
+      focusPower,
+    );
     const comboMultiplier =
       action.damageMax > 0 ? getAttackComboMultiplier(action.id) : 1;
-    const playerDamage =
-      action.damageMax > 0
-        ? Math.round(randomBetween(damageRange.min, damageRange.max) * comboMultiplier)
+    const playerDamage = verifiedAction
+      ? verifiedAction.damage
+      : action.damageMax > 0
+        ? Math.round(
+            randomBetween(damageRange.min, damageRange.max) *
+              comboMultiplier *
+              mechanic.damageMultiplier,
+          )
         : 0;
     const assistDamage =
-      playerDamage > 0 ? getPartyAssistDamage(action.partyMultiplier) : 0;
+      !partyRaidActive && playerDamage > 0
+        ? getPartyAssistDamage(action.partyMultiplier)
+        : 0;
     const damage = playerDamage + assistDamage;
-    const bossHit = calculateBossHit(damage);
-    const healingPower = getCoreHealing(action);
+    const bossHit = verifiedAction
+      ? {
+          hpDamage: verifiedAction.damage,
+          nextHp: verifiedAction.bossHp,
+          nextPhase: getBossPhase(
+            verifiedAction.bossHp,
+            verifiedAction.bossMaxHp,
+          ),
+          nextShield: 0,
+          phaseBarrier: 0,
+          shieldAbsorbed: 0,
+        }
+      : calculateBossHit(damage);
+    const healingPower = getCoreHealing(action) + mechanic.bonusHealing;
     const healing = Math.min(healingPower, playerMaxHp - playerHp);
     const nextPlayerHp = Math.min(playerMaxHp, playerHp + healingPower);
     const energyChange =
@@ -930,6 +1057,8 @@ export default function RaidScreen() {
           : 0,
       ),
     );
+    setClassStatus(mechanic.nextStatus);
+    if (mechanic.message) addLog(mechanic.message);
 
     if (damage > 0) {
       await animateHeroAttack(playerDamage, action.id === 'power', {
@@ -1026,7 +1155,7 @@ export default function RaidScreen() {
     }
 
     if (bossHit.nextHp === 0) {
-      completeVictory(`${action.name} finished the raid!`);
+      void completeVictory(`${action.name} finished the raid!`);
       return;
     }
 
@@ -1037,7 +1166,12 @@ export default function RaidScreen() {
       )
     ) return;
 
-    await bossTurn(nextPlayerHp, action.guardPercent);
+    await bossTurn(
+      nextPlayerHp,
+      action.guardPercent,
+      mechanic.nextStatus,
+      bossHit.nextHp,
+    );
   }
 
   async function useClassAbility(skill: SkillNode) {
@@ -1056,18 +1190,43 @@ export default function RaidScreen() {
       return;
     }
 
+
+    if (partyRaidActive) setTurnLocked(true);
+    const verifiedAction = partyRaidActive
+      ? await performRaidAction('ability')
+      : null;
+    if (partyRaidActive && !verifiedAction) {
+      setTurnLocked(false);
+      setStatus('The raid server rejected the ability. Reconnect and try again.');
+      return;
+    }
+
     const comboMultiplier = getAttackComboMultiplier(skill.id);
-    const playerDamage = Math.round(
+    const playerDamage = verifiedAction?.damage ?? Math.round(
       (randomBetween(ability.damageMin, ability.damageMax) *
-        (1 + skillBonuses.damageBonus + equippedGear.damageBonus) +
+        (1 + skillBonuses.damageBonus + equippedGear.damageBonus + runDamageBonus) +
         focusPower * 3 +
         strengthPower * 2) * comboMultiplier,
     );
-    const assistDamage = getPartyAssistDamage(
-      skill.tier >= 8 ? 1.6 : skill.tier >= 3 ? 1.4 : 1.1,
-    );
+    const assistDamage = partyRaidActive
+      ? 0
+      : getPartyAssistDamage(
+          skill.tier >= 8 ? 1.6 : skill.tier >= 3 ? 1.4 : 1.1,
+        );
     const damage = playerDamage + assistDamage;
-    const bossHit = calculateBossHit(damage);
+    const bossHit = verifiedAction
+      ? {
+          hpDamage: verifiedAction.damage,
+          nextHp: verifiedAction.bossHp,
+          nextPhase: getBossPhase(
+            verifiedAction.bossHp,
+            verifiedAction.bossMaxHp,
+          ),
+          nextShield: 0,
+          phaseBarrier: 0,
+          shieldAbsorbed: 0,
+        }
+      : calculateBossHit(damage);
     const healing = Math.round(
       ability.healing * (1 + skillBonuses.healingBonus),
     );
@@ -1136,7 +1295,7 @@ export default function RaidScreen() {
     }
 
     if (bossHit.nextHp === 0) {
-      completeVictory(`${skill.name} finished the raid!`);
+      void completeVictory(`${skill.name} finished the raid!`);
       return;
     }
 
@@ -1146,7 +1305,12 @@ export default function RaidScreen() {
       )
     ) return;
 
-    await bossTurn(nextPlayerHp, ability.guardPercent);
+    await bossTurn(
+      nextPlayerHp,
+      ability.guardPercent,
+      classStatus,
+      bossHit.nextHp,
+    );
   }
 
   function getCoreActionSubtitle(action: CoreCombatAction) {
@@ -1181,16 +1345,22 @@ export default function RaidScreen() {
     sceneOpacity.setValue(1);
     sceneX.setValue(0);
     setSelectedDungeonId(nextDungeonId);
+    finalVictoryInFlight.current = false;
     setPartyRaidActive(false);
     setRoomIndex(0);
     setPlayerHp(playerMaxHp);
-    setBossHp(firstEnemy.maxHp);
+    setBossHp(
+      Math.round(firstEnemy.maxHp * getDungeonAffix(nextDungeonId).hpMultiplier),
+    );
     setEnergy(startingEnergy);
     setBossTurnNumber(0);
     setBossShield(0);
     setStagger(0);
     setCombo(0);
     setLastDamageActionId(null);
+    setClassStatus(EMPTY_CLASS_STATUS);
+    setRunDamageBonus(0);
+    setRunGuardBonus(0);
     setCooldowns({});
     setTurnLocked(false);
     setOutcome('fighting');
@@ -1243,11 +1413,12 @@ export default function RaidScreen() {
     sceneOpacity.setValue(1);
     sceneX.setValue(0);
     setSelectedDungeonId(raidDungeonId);
+    finalVictoryInFlight.current = false;
     setRoomIndex(bossRoomIndex);
     setPartyRaidActive(true);
     setPlayerHp(playerMaxHp);
     setBossHp(
-      Math.round(raidBoss.maxHp * 1.35),
+      onlineRaid?.bossHp ?? Math.round(raidBoss.maxHp * 1.35),
     );
     setEnergy(100);
     setBossTurnNumber(0);
@@ -1255,6 +1426,9 @@ export default function RaidScreen() {
     setStagger(0);
     setCombo(0);
     setLastDamageActionId(null);
+    setClassStatus(EMPTY_CLASS_STATUS);
+    setRunDamageBonus(0);
+    setRunGuardBonus(0);
     setCooldowns({});
     setTurnLocked(false);
     setOutcome('fighting');
@@ -1309,12 +1483,17 @@ export default function RaidScreen() {
     sceneOpacity.setValue(0);
     sceneX.setValue(-26);
     setRoomIndex(nextIndex);
-    setBossHp(nextEnemy.maxHp);
+    setBossHp(
+      Math.round(
+        nextEnemy.maxHp * (partyRaidActive ? 1 : dungeonAffix.hpMultiplier),
+      ),
+    );
     setBossTurnNumber(0);
     setBossShield(0);
     setStagger(0);
     setCombo(0);
     setLastDamageActionId(null);
+    setClassStatus(EMPTY_CLASS_STATUS);
     setEnergy((current) => Math.min(100, current + 12));
     setOutcome('fighting');
     setVictoryRewardEarned(false);
@@ -1362,6 +1541,28 @@ export default function RaidScreen() {
     void advanceRoom();
   }
 
+  function choosePathBoon(boon: DungeonBoon) {
+    if (boon.damageBonus > 0) {
+      setRunDamageBonus((current) =>
+        Math.min(0.24, current + boon.damageBonus),
+      );
+    }
+    if (boon.guardBonus > 0) {
+      setRunGuardBonus((current) =>
+        Math.min(0.24, current + boon.guardBonus),
+      );
+    }
+    if (boon.healPercent > 0) {
+      const restored = Math.round(playerMaxHp * boon.healPercent);
+      setPlayerHp((current) => Math.min(playerMaxHp, current + restored));
+    }
+    addLog(`${boon.name} chosen. ${boon.description}.`);
+    void Haptics.notificationAsync(
+      Haptics.NotificationFeedbackType.Success,
+    ).catch(() => undefined);
+    void advanceRoom();
+  }
+
   function restartDungeon() {
     if (partyRaidActive) {
       startPartyRaid();
@@ -1373,10 +1574,14 @@ export default function RaidScreen() {
   function leaveDungeon() {
     if (turnLocked && !partyLinkLost) return;
     setRunPhase('selection');
+    finalVictoryInFlight.current = false;
     setPartyRaidActive(false);
     setReadyMemberIds([]);
     setReadyCheckActive(false);
     setRoomIndex(0);
+    setClassStatus(EMPTY_CLASS_STATUS);
+    setRunDamageBonus(0);
+    setRunGuardBonus(0);
     routeProgress.setValue(0);
   }
 
@@ -1431,6 +1636,7 @@ export default function RaidScreen() {
               <Text style={styles.dungeonSectionLabel}>CHOOSE A DUNGEON</Text>
               {DUNGEONS.map((dungeonItem, dungeonIndex) => {
             const dungeonBoss = getRaidBoss(dungeonItem.bossId);
+            const itemAffix = getDungeonAffix(dungeonItem.id);
             const levelReady = level >= dungeonItem.recommendedLevel;
             const previousDungeon = DUNGEONS[dungeonIndex - 1];
             const routeReady =
@@ -1478,7 +1684,17 @@ export default function RaidScreen() {
                     </Text>
                     <Text style={styles.dungeonMeta}>BOSS · {dungeonBoss.name.toUpperCase()}</Text>
                     <Text style={styles.dungeonMeta}>{dungeonBoss.maxHp.toLocaleString()} BOSS HP</Text>
-                    <Text style={styles.dungeonMeta}>{dungeonBoss.rewardXp} XP CHEST</Text>
+                    <Text style={styles.dungeonMeta}>
+                      {isRaidRewardAvailable(dungeonItem.id)
+                        ? `${dungeonBoss.rewardXp} XP READY`
+                        : 'XP CLAIMED · RESETS NOON'}
+                    </Text>
+                  </View>
+                  <View style={[styles.affixPill, { borderColor: `${itemAffix.accent}88` }]}>
+                    <GameIcon token={itemAffix.icon} size={22} />
+                    <Text style={[styles.affixPillText, { color: itemAffix.accent }]}>
+                      {itemAffix.name.toUpperCase()} · +{Math.round((itemAffix.rewardMultiplier - 1) * 100)}% XP
+                    </Text>
                   </View>
                   <Text
                     style={[
@@ -1714,14 +1930,24 @@ export default function RaidScreen() {
               <Text style={styles.roomEventDescription}>{room.description}</Text>
 
               {room.kind === 'path' ? (
-                <Pressable
-                  style={[styles.primaryDungeonButton, { backgroundColor: dungeon.accent }]}
-                  onPress={() => void advanceRoom()}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.primaryDungeonButtonText}>{room.actionLabel}</Text>
-                  <Text style={styles.primaryDungeonButtonArrow}>→</Text>
-                </Pressable>
+                <View style={styles.pathChoiceWrap}>
+                  <Text style={styles.pathChoiceLabel}>{room.actionLabel} · CHOOSE ONE ROUTE BOON</Text>
+                  <View style={styles.pathBoonChoices}>
+                    {DUNGEON_BOONS.map((boon) => (
+                      <Pressable
+                        key={boon.id}
+                        style={[styles.pathBoonButton, { borderColor: `${dungeon.accent}88` }]}
+                        onPress={() => choosePathBoon(boon)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${boon.name}. ${boon.description}`}
+                      >
+                        <GameIcon token={boon.icon} size={34} />
+                        <Text style={styles.boonTitle}>{boon.name.toUpperCase()}</Text>
+                        <Text style={styles.boonText}>{boon.description}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
               ) : (
                 <View style={styles.boonChoices}>
                   <Pressable
@@ -1840,6 +2066,26 @@ export default function RaidScreen() {
             <Text style={[styles.intentThreat, { color: bossIntent.color }]}>
               {bossIntent.kind === 'heavy' ? 'HEAVY' : bossIntent.kind === 'drain' ? 'DRAIN' : bossIntent.kind === 'fortify' ? 'WARD' : 'STRIKE'}
             </Text>
+          </View>
+          <View style={styles.combatModifierRow}>
+            <View style={[styles.combatModifier, { borderColor: `${dungeonAffix.accent}70` }]}>
+              <GameIcon token={dungeonAffix.icon} size={25} />
+              <View style={styles.combatModifierCopy}>
+                <Text style={[styles.combatModifierName, { color: dungeonAffix.accent }]}>{dungeonAffix.name.toUpperCase()}</Text>
+                <Text style={styles.combatModifierText}>{dungeonAffix.description}</Text>
+              </View>
+            </View>
+            <View style={[styles.combatModifier, { borderColor: `${character.color}70` }]}>
+              <GameIcon token={character.icon} size={25} />
+              <View style={styles.combatModifierCopy}>
+                <Text style={[styles.combatModifierName, { color: character.color }]}>{getClassMechanicName(characterClass).toUpperCase()}</Text>
+                <Text style={styles.combatModifierText}>
+                  {classStatus.id
+                    ? `${classStatus.turns} turns · ${classStatus.potency} potency`
+                    : 'Ready to activate through your class actions'}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
 
@@ -2113,8 +2359,8 @@ export default function RaidScreen() {
                 {outcome === 'victory'
                   ? boss.isFinalBoss
                     ? victoryRewardEarned
-                      ? `${dungeon.name} is complete. The daily boss reward was claimed.`
-                      : `${dungeon.name} is complete. Today’s XP reward was already claimed.`
+                      ? `${dungeon.name} is complete. This raid’s daily reward was claimed.`
+                      : `${dungeon.name} is complete. This raid’s XP reward was already claimed today.`
                     : `${boss.name} is defeated. Your current HP carries into the next room.`
                   : `The party fell in room ${roomIndex + 1}. Restart the dungeon and choose your shrine boon carefully.`}
               </Text>
@@ -2147,8 +2393,8 @@ export default function RaidScreen() {
             <Text style={styles.rewardTitle}>FINAL BOSS CHEST</Text>
             <Text style={styles.rewardText}>
               {raidRewardAvailable
-                ? `${getRaidBoss(dungeon.bossId).rewardXp} XP and +2 to your class stat await at room ${dungeon.rooms.length}.`
-                : 'Claimed today. Further battles still increase your win count.'}
+                ? `${Math.round((getRaidBoss(dungeon.bossId).rewardXp * dungeonAffix.rewardMultiplier) / 5) * 5} XP and +2 to your class stat await at room ${dungeon.rooms.length}.`
+                : 'Claimed for this raid today. Other raids still have their own daily rewards.'}
             </Text>
           </View>
         </View>
@@ -2657,6 +2903,36 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.6,
     marginLeft: 6,
+  },
+  combatModifierRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  combatModifier: {
+    flex: 1,
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: '#10131C',
+    padding: 9,
+  },
+  combatModifierCopy: {
+    flex: 1,
+    marginLeft: 7,
+  },
+  combatModifierName: {
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  combatModifierText: {
+    color: '#858DA0',
+    fontSize: 7,
+    lineHeight: 10,
+    marginTop: 3,
   },
   playerStats: {
     marginTop: 4,
@@ -3221,6 +3497,23 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.65,
   },
+  affixPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 10,
+    backgroundColor: '#10131D',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    marginTop: 8,
+  },
+  affixPillText: {
+    fontSize: 6,
+    fontWeight: '900',
+    letterSpacing: 0.45,
+  },
   recommendedLevel: {
     color: '#FFB45E',
     fontSize: 8,
@@ -3494,6 +3787,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 19,
     fontWeight: '900',
+  },
+  pathChoiceWrap: {
+    alignSelf: 'stretch',
+    marginTop: 18,
+  },
+  pathChoiceLabel: {
+    color: '#8E96A9',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textAlign: 'center',
+  },
+  pathBoonChoices: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 10,
+  },
+  pathBoonButton: {
+    flex: 1,
+    minHeight: 125,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    backgroundColor: '#181C28',
+    paddingHorizontal: 6,
+    paddingVertical: 10,
   },
   boonChoices: {
     alignSelf: 'stretch',

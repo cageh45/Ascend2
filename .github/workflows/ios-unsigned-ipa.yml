@@ -29,6 +29,26 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Verify multiplayer build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${EXPO_PUBLIC_SUPABASE_URL}" || -z "${EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" ]]; then
+            echo "::error::Ascend multiplayer requires the EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY repository variables."
+            exit 1
+          fi
+
+          if [[ ! "${EXPO_PUBLIC_SUPABASE_URL}" =~ ^https://.+\.supabase\.co$ ]]; then
+            echo "::error::EXPO_PUBLIC_SUPABASE_URL is not a valid Supabase project URL."
+            exit 1
+          fi
+
+          if [[ "${EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" != sb_publishable_* ]]; then
+            echo "::error::EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY is not a Supabase publishable key."
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -87,7 +107,9 @@ jobs:
 
           mkdir -p build/unsigned-ipa/Payload
           ditto "$app_path" build/unsigned-ipa/Payload/Ascend.app
-          cp ios/Ascend/Ascend.entitlements build/unsigned-ipa/Ascend.entitlements
+          if [[ -f ios/Ascend/Ascend.entitlements ]]; then
+            cp ios/Ascend/Ascend.entitlements build/unsigned-ipa/Ascend.entitlements
+          fi
 
           (
             cd build/unsigned-ipa

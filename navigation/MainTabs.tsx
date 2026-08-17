@@ -8,7 +8,6 @@ import ProfileScreen from '../screens/ProfileScreen';
 import FriendsScreen from '../screens/FriendsScreen';
 import AnimatedTabBar from './AnimatedTabBar';
 import { MainTabParamList } from './types';
-import { FEATURES } from '../config/features';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
@@ -39,13 +38,11 @@ export default function MainTabs() {
         options={{ title: 'Raid' }}
       />
 
-      {FEATURES.multiplayer && (
-        <Tab.Screen
-          name="FriendsTab"
-          component={FriendsScreen}
-          options={{ title: 'Friends' }}
-        />
-      )}
+      <Tab.Screen
+        name="FriendsTab"
+        component={FriendsScreen}
+        options={{ title: 'Friends' }}
+      />
 
       <Tab.Screen
         name="ProfileTab"

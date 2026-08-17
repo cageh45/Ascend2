@@ -52,6 +52,7 @@ export default function ProfileScreen() {
     unlockedSkillIds,
   } = useGame();
   const {
+    deleteOnlineAccount,
     errorMessage: authError,
     sendEmailLink,
     status: authStatus,
@@ -79,6 +80,7 @@ export default function ProfileScreen() {
   const [showAccount, setShowAccount] = useState(false);
   const [email, setEmail] = useState('');
   const [emailSent, setEmailSent] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useFocusEffect(useCallback(() => playTrack('sanctuary'), [playTrack]));
 
@@ -101,6 +103,24 @@ export default function ProfileScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Reset', style: 'destructive', onPress: resetProgress },
+      ],
+    );
+  }
+
+  function confirmOnlineAccountDeletion() {
+    Alert.alert(
+      'Delete online account?',
+      'This permanently removes your online identity, friends, party, chat, and raid records. Your local character progress remains on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: () => {
+            setDeletingAccount(true);
+            void deleteOnlineAccount().finally(() => setDeletingAccount(false));
+          },
+        },
       ],
     );
   }
@@ -277,6 +297,25 @@ export default function ProfileScreen() {
         )}
 
         {storageError && <Text style={styles.storageError}>{storageError}</Text>}
+
+        {authStatus === 'authenticated' && (
+          <>
+            <Pressable
+              style={styles.deleteAccountButton}
+              onPress={confirmOnlineAccountDeletion}
+              disabled={deletingAccount}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: deletingAccount }}
+            >
+              <Text style={styles.deleteAccountText}>
+                {deletingAccount ? 'DELETING ONLINE ACCOUNT…' : 'DELETE ONLINE ACCOUNT'}
+              </Text>
+            </Pressable>
+            {authError && !showAccount && (
+              <Text style={styles.accountActionError}>{authError}</Text>
+            )}
+          </>
+        )}
 
         <Pressable style={styles.resetButton} onPress={confirmReset} accessibilityRole="button">
           <Text style={styles.resetText}>RESET LOCAL DATA</Text>
@@ -576,4 +615,7 @@ const styles = StyleSheet.create({
   accountClose: { color: '#9299AA', fontSize: 9, fontWeight: '900', textAlign: 'center', paddingTop: 16 },
   resetButton: { height: 48, borderWidth: 1, borderColor: '#61383D', borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 22 },
   resetText: { color: '#FF7770', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  deleteAccountButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
+  deleteAccountText: { color: '#B56B73', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  accountActionError: { color: '#FF9EAD', fontSize: 9, lineHeight: 14, textAlign: 'center' },
 });

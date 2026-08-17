@@ -1,6 +1,7 @@
 # Ascend service setup
 
-The repository contains the client integrations and database migration. It does
+The repository contains the client integrations, database migrations, and
+account-deletion Edge Function. It does
 not contain cloud credentials, signing identities, or store approvals.
 
 ## 1. Create and link Supabase
@@ -17,6 +18,7 @@ npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
 npx supabase config push
+npx supabase functions deploy delete-account
 ```
 
 The checked-in `supabase/config.toml` keeps anonymous sign-in, manual account
@@ -34,8 +36,11 @@ after changing them because Expo embeds public variables in the client bundle.
 The migrations create synced player profiles, searchable handles, friend
 requests and cancellations, friendships, four-member parties, invites,
 persistent chat, online heartbeats, raid sessions, ready state, RLS, private
-party presence authorization, and scoped RPCs. Generate fresh database types
-from the linked project after every schema change:
+party presence authorization, player blocking/reporting, server-authoritative
+raid actions, and one verified reward per dungeon per day. The delete-account
+function must remain JWT-protected and must never expose its service-role key to
+the client. Generate fresh database types from the linked project after every
+schema change:
 
 ```sh
 npx supabase gen types typescript --linked > services/database.types.ts
@@ -74,8 +79,8 @@ npm run verify:release
 
 Test account-link callback handling, two-way friend requests, party capacity
 races, private chat/presence, disconnect/reconnect behavior, and four-device raid
-ready checks against a staging project. Exercise every timer, counter, checklist,
-and journal quest on real iOS and Android builds.
-
-Online raid rewards remain disabled until combat and quest validation move to a
-trusted server action processor. Do not enable client-awarded online XP.
+ready checks and synchronized actions against a staging project. Confirm that
+blocking removes social access, reports are retained for review, account deletion
+cascades social data, and each dungeon reward can be claimed only once per UTC
+day. Exercise every timer, counter, checklist, and journal quest on real iOS and
+Android builds.

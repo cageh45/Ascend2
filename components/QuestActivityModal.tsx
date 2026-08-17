@@ -16,10 +16,15 @@ import * as Haptics from 'expo-haptics';
 import GameIcon from './GameIcon';
 
 import type { QuestDefinition } from '../game/gameData';
+import { getQuestCycleKey } from '../game/gameData';
+import {
+  JournalEntry,
+  loadJournalEntries,
+  saveJournalEntries,
+} from '../game/journalData';
 import { getQuestActivity } from '../game/questActivityData';
 
 const PROGRESS_PREFIX = '@ascend/quest-activity-v1';
-const JOURNAL_KEY = '@ascend/quest-journal-v1';
 
 type QuestProgress = {
   timerEndAt: number | null;
@@ -28,14 +33,6 @@ type QuestProgress = {
   counterValue: number;
   checkedIndices: number[];
   journalDraft: string;
-};
-
-type JournalEntry = {
-  id: string;
-  questId: string;
-  questTitle: string;
-  note: string;
-  savedAt: number;
 };
 
 type Props = {
@@ -67,9 +64,11 @@ export default function QuestActivityModal({
   const [storageError, setStorageError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const claimInFlight = useRef(false);
+  const pendingCompletion = useRef<QuestDefinition | null>(null);
+  const completionFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const progressKey = quest
-    ? `${PROGRESS_PREFIX}:${getDayKey()}:${quest.id}`
+    ? `${PROGRESS_PREFIX}:${getQuestCycleKey()}:${quest.id}`
     : null;
   const lastEntry = useMemo(
     () => journalEntries.find((entry) => entry.questId === quest?.id),
@@ -87,12 +86,12 @@ export default function QuestActivityModal({
 
     void Promise.all([
       AsyncStorage.getItem(progressKey),
-      AsyncStorage.getItem(JOURNAL_KEY),
+      loadJournalEntries(),
     ])
       .then(([storedProgress, storedJournal]) => {
         if (cancelled) return;
         setProgress(restoreProgress(storedProgress, activity));
-        setJournalEntries(restoreJournal(storedJournal));
+        setJournalEntries(storedJournal);
         setHydrated(true);
       })
       .catch(() => {
@@ -107,6 +106,26 @@ export default function QuestActivityModal({
       cancelled = true;
     };
   }, [activity, progressKey, quest, visible]);
+
+  useEffect(
+    () => () => {
+      if (completionFallback.current) clearTimeout(completionFallback.current);
+    },
+    [],
+  );
+
+  function finishPendingCompletion() {
+    if (!pendingCompletion.current) return;
+    const completedQuest = pendingCompletion.current;
+    pendingCompletion.current = null;
+    if (completionFallback.current) {
+      clearTimeout(completionFallback.current);
+      completionFallback.current = null;
+    }
+    claimInFlight.current = false;
+    setClaiming(false);
+    onComplete(completedQuest);
+  }
 
   useEffect(() => {
     if (!visible || !hydrated || !progressKey) return;
@@ -216,9 +235,11 @@ export default function QuestActivityModal({
           note: progress.journalDraft.trim(),
           savedAt: Date.now(),
         };
-        const nextEntries = [entry, ...journalEntries].slice(0, 100);
+        const nextEntries = await saveJournalEntries([
+          entry,
+          ...journalEntries,
+        ]);
         setJournalEntries(nextEntries);
-        await AsyncStorage.setItem(JOURNAL_KEY, JSON.stringify(nextEntries));
       }
       await AsyncStorage.removeItem(progressKey);
     } catch {
@@ -234,10 +255,13 @@ export default function QuestActivityModal({
       Haptics.NotificationFeedbackType.Success,
     ).catch(() => undefined);
 
-    // Dismiss the native modal before its parent quest list changes. Updating
-    // both native view trees in one frame can destabilize Fabric on devices.
+    // Let the native modal finish dismissing before its parent quest list and
+    // reward overlay update. This avoids overlapping Fabric view-tree changes.
+    pendingCompletion.current = selectedQuest;
     onClose();
-    requestAnimationFrame(() => onComplete(selectedQuest));
+    if (Platform.OS !== 'ios') {
+      completionFallback.current = setTimeout(finishPendingCompletion, 320);
+    }
   }
 
   return (
@@ -245,6 +269,7 @@ export default function QuestActivityModal({
       visible={visible}
       transparent
       animationType="slide"
+      onDismiss={finishPendingCompletion}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
@@ -467,16 +492,6 @@ function restoreProgress(
   }
 }
 
-function restoreJournal(value: string | null): JournalEntry[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 function getRemainingSeconds(
   progress: QuestProgress,
   activity: NonNullable<ReturnType<typeof getQuestActivity>>,
@@ -487,11 +502,6 @@ function getRemainingSeconds(
     return Math.max(0, Math.ceil((progress.timerEndAt - now) / 1000));
   }
   return progress.timerRemainingSeconds ?? activity.durationSeconds;
-}
-
-function getDayKey() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function formatTimer(seconds: number) {

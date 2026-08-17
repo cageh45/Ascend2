@@ -384,10 +384,74 @@ export type Database = {
         }
         Relationships: []
       }
+      content_reports: {
+        Row: {
+          category: string
+          created_at: string
+          details: string
+          id: string
+          party_message_id: string | null
+          reported_user_id: string
+          reporter_id: string
+          status: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          details?: string
+          id?: string
+          party_message_id?: string | null
+          reported_user_id: string
+          reporter_id: string
+          status?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          details?: string
+          id?: string
+          party_message_id?: string | null
+          reported_user_id?: string
+          reporter_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      raid_actions: {
+        Row: {
+          action_kind: string
+          boss_hp_after: number
+          created_at: string
+          damage: number
+          id: number
+          raid_session_id: string
+          user_id: string
+        }
+        Insert: {
+          action_kind: string
+          boss_hp_after: number
+          created_at?: string
+          damage: number
+          id?: number
+          raid_session_id: string
+          user_id: string
+        }
+        Update: {
+          action_kind?: string
+          boss_hp_after?: number
+          created_at?: string
+          damage?: number
+          id?: number
+          raid_session_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       raid_participants: {
         Row: {
           connected: boolean
           damage: number
+          last_action_at: string | null
           last_seen_at: string
           raid_session_id: string
           ready: boolean
@@ -397,6 +461,7 @@ export type Database = {
         Insert: {
           connected?: boolean
           damage?: number
+          last_action_at?: string | null
           last_seen_at?: string
           raid_session_id: string
           ready?: boolean
@@ -406,6 +471,7 @@ export type Database = {
         Update: {
           connected?: boolean
           damage?: number
+          last_action_at?: string | null
           last_seen_at?: string
           raid_session_id?: string
           ready?: boolean
@@ -439,19 +505,25 @@ export type Database = {
       raid_reward_claims: {
         Row: {
           claimed_at: string
+          dungeon_id: string
           raid_session_id: string
+          reward_day: string
           reward_xp: number
           user_id: string
         }
         Insert: {
           claimed_at?: string
+          dungeon_id: string
           raid_session_id: string
+          reward_day: string
           reward_xp: number
           user_id: string
         }
         Update: {
           claimed_at?: string
+          dungeon_id?: string
           raid_session_id?: string
+          reward_day?: string
           reward_xp?: number
           user_id?: string
         }
@@ -540,6 +612,24 @@ export type Database = {
           },
         ]
       }
+      social_blocks: {
+        Row: {
+          blocked_id: string
+          blocker_id: string
+          created_at: string
+        }
+        Insert: {
+          blocked_id: string
+          blocker_id: string
+          created_at?: string
+        }
+        Update: {
+          blocked_id?: string
+          blocker_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       party_roster: {
@@ -576,9 +666,14 @@ export type Database = {
         Args: { request_id: string }
         Returns: undefined
       }
+      block_player: { Args: { target_user: string }; Returns: undefined }
       cancel_friend_request: {
         Args: { request_id: string }
         Returns: undefined
+      }
+      claim_verified_raid_reward: {
+        Args: { requested_session_id: string }
+        Returns: Json
       }
       complete_raid_session: {
         Args: {
@@ -608,11 +703,26 @@ export type Database = {
         Returns: undefined
       }
       leave_current_party: { Args: never; Returns: undefined }
+      perform_raid_action: {
+        Args: {
+          requested_action_kind: string
+          requested_session_id: string
+        }
+        Returns: Json
+      }
       remove_friend: { Args: { target_user: string }; Returns: undefined }
       remove_party_member: { Args: { target_user: string }; Returns: undefined }
       respond_party_invite: {
         Args: { accept_invite: boolean; invite_id: string }
         Returns: undefined
+      }
+      report_party_message: {
+        Args: {
+          requested_category: string
+          requested_details?: string
+          requested_message_id: string
+        }
+        Returns: string
       }
       search_players: {
         Args: { result_limit?: number; search_term?: string }
@@ -676,6 +786,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      unblock_player: { Args: { target_user: string }; Returns: undefined }
     }
     Enums: {
       friend_request_status: "pending" | "accepted" | "declined"

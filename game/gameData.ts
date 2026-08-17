@@ -359,8 +359,92 @@ export const QUESTS: readonly QuestDefinition[] = [
   ...CLASS_QUESTS.Ranger,
 ];
 
-export function getDailyQuests(characterClass: CharacterClassName) {
-  return [...CLASS_QUESTS[characterClass], ...SHARED_QUESTS];
+export const DAILY_QUEST_SET_COUNT = 10;
+export const DAILY_QUEST_RESET_HOUR = 12;
+export const DAILY_CLASS_QUEST_COUNT = 8;
+export const DAILY_SHARED_QUEST_COUNT = 4;
+export const DAILY_QUEST_COUNT =
+  DAILY_CLASS_QUEST_COUNT + DAILY_SHARED_QUEST_COUNT;
+
+export type DailyQuestSet = {
+  cycleKey: string;
+  index: number;
+  classQuests: readonly QuestDefinition[];
+  sharedQuests: readonly QuestDefinition[];
+  quests: readonly QuestDefinition[];
+};
+
+export function getQuestCycleKey(date = new Date()) {
+  const shifted = new Date(date);
+  shifted.setHours(shifted.getHours() - DAILY_QUEST_RESET_HOUR);
+  const year = shifted.getFullYear();
+  const month = String(shifted.getMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getPreviousQuestCycleKey(date = new Date()) {
+  const previousCycle = new Date(date);
+  previousCycle.setDate(previousCycle.getDate() - 1);
+  return getQuestCycleKey(previousCycle);
+}
+
+export function getQuestWeekKey(date = new Date()) {
+  const shifted = new Date(date);
+  shifted.setHours(shifted.getHours() - DAILY_QUEST_RESET_HOUR);
+  const day = shifted.getDay();
+  const daysSinceMonday = (day + 6) % 7;
+  shifted.setDate(shifted.getDate() - daysSinceMonday);
+  const year = shifted.getFullYear();
+  const month = String(shifted.getMonth() + 1).padStart(2, '0');
+  const monthDay = String(shifted.getDate()).padStart(2, '0');
+  return `${year}-${month}-${monthDay}`;
+}
+
+export function getDailyQuestSet(
+  characterClass: CharacterClassName,
+  date = new Date(),
+): DailyQuestSet {
+  const cycleKey = getQuestCycleKey(date);
+  const [year, month, day] = cycleKey.split('-').map(Number);
+  const cycleNumber = Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
+  const index = positiveModulo(cycleNumber, DAILY_QUEST_SET_COUNT);
+  const classOffset = CHARACTER_CLASS_NAMES.indexOf(characterClass);
+  const classQuests = rotateTake(
+    CLASS_QUESTS[characterClass],
+    index * 3,
+    DAILY_CLASS_QUEST_COUNT,
+  );
+  const sharedQuests = rotateTake(
+    SHARED_QUESTS,
+    index * 2 + classOffset,
+    DAILY_SHARED_QUEST_COUNT,
+  );
+  return {
+    cycleKey,
+    index,
+    classQuests,
+    sharedQuests,
+    quests: [...classQuests, ...sharedQuests],
+  };
+}
+
+export function getDailyQuests(
+  characterClass: CharacterClassName,
+  date = new Date(),
+) {
+  return getDailyQuestSet(characterClass, date).quests;
+}
+
+function rotateTake<T>(items: readonly T[], start: number, count: number) {
+  return Array.from(
+    { length: Math.min(count, items.length) },
+    (_, index) => items[positiveModulo(start + index, items.length)],
+  );
+}
+
+function positiveModulo(value: number, divisor: number) {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 export type QuestId = QuestDefinition['id'];

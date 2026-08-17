@@ -27,6 +27,7 @@ type AuthContextValue = {
   errorMessage: string | null;
   enableOnlineAccount: () => Promise<boolean>;
   sendEmailLink: (email: string) => Promise<boolean>;
+  deleteOnlineAccount: () => Promise<boolean>;
   signOut: () => Promise<void>;
 };
 
@@ -157,6 +158,23 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setStatus('signedOut');
   }, []);
 
+  const deleteOnlineAccount = useCallback(async () => {
+    if (!supabase || !session?.user) return false;
+    setErrorMessage(null);
+    const { error } = await supabase.functions.invoke('delete-account', {
+      body: {},
+    });
+    if (error) {
+      setErrorMessage(error.message);
+      return false;
+    }
+
+    await supabase.auth.signOut({ scope: 'local' });
+    setSession(null);
+    setStatus('signedOut');
+    return true;
+  }, [session]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -165,9 +183,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       errorMessage,
       enableOnlineAccount,
       sendEmailLink,
+      deleteOnlineAccount,
       signOut,
     }),
-    [enableOnlineAccount, errorMessage, sendEmailLink, session, signOut, status],
+    [deleteOnlineAccount, enableOnlineAccount, errorMessage, sendEmailLink, session, signOut, status],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

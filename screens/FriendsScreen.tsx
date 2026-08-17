@@ -39,6 +39,8 @@ export default function FriendsScreen() {
   const {
     acceptFriendRequest,
     available,
+    blockedUserIds,
+    blockPlayer,
     cancelFriendRequest,
     createParty,
     declineFriendRequest,
@@ -57,11 +59,13 @@ export default function FriendsScreen() {
     refresh,
     removeFriend,
     removePartyMember,
+    reportMessage,
     respondPartyInvite,
     sendFriendRequest,
     sendMessage,
     searchPlayers,
     suggestions,
+    unblockPlayer,
   } = useSocial();
   const { playTrack } = useMusic();
   const [showParty, setShowParty] = useState(false);
@@ -154,29 +158,63 @@ export default function FriendsScreen() {
     ]);
   }
 
+  function confirmBlock(profileId: string, name: string) {
+    Alert.alert(
+      'Block player?',
+      `${name} will be removed from your friends and party. Their messages and invitations will be hidden.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Block', style: 'destructive', onPress: () => void run(() => blockPlayer(profileId)) },
+      ],
+    );
+  }
+
+  function openMessageSafety(messageId: string, senderId: string, senderName: string) {
+    Alert.alert('Message options', `Choose an action for ${senderName}.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Report',
+        onPress: () => Alert.alert('Report message?', 'This sends the message to Ascend moderation for review.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Report', style: 'destructive', onPress: () => void run(() => reportMessage(messageId, 'harassment')) },
+        ]),
+      },
+      { text: 'Block', style: 'destructive', onPress: () => confirmBlock(senderId, senderName) },
+    ]);
+  }
+
   const finderProfiles = searchQuery.trim() ? searchResults : suggestions;
 
   if (!available) {
+    const servicesMissing = authStatus === 'unconfigured';
+
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.connectScreen}>
           <Text style={styles.connectIcon}>◇</Text>
-          <Text style={styles.connectTitle}>Enable your online Ascendant</Text>
-          <Text style={styles.connectText}>
-            Ascend creates a private authenticated player ID for friends, party chat,
-            presence, and synchronized raids. You can link an email later.
+          <Text style={styles.connectTitle}>
+            {servicesMissing
+              ? 'Online services are missing from this build'
+              : 'Enable your online Ascendant'}
           </Text>
-          <Pressable
-            style={styles.primaryButton}
-            onPress={() => void enableOnlineAccount()}
-            disabled={authStatus === 'connecting' || authStatus === 'checking'}
-          >
-            {authStatus === 'connecting' || authStatus === 'checking' ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>ENABLE ONLINE PLAY</Text>
-            )}
-          </Pressable>
+          <Text style={styles.connectText}>
+            {servicesMissing
+              ? 'Rebuild Ascend with its public Supabase URL and publishable key to enable friends, party chat, presence, and synchronized raids.'
+              : 'Ascend creates a private authenticated player ID for friends, party chat, presence, and synchronized raids. You can link an email later.'}
+          </Text>
+          {!servicesMissing && (
+            <Pressable
+              style={styles.primaryButton}
+              onPress={() => void enableOnlineAccount()}
+              disabled={authStatus === 'connecting' || authStatus === 'checking'}
+            >
+              {authStatus === 'connecting' || authStatus === 'checking' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>ENABLE ONLINE PLAY</Text>
+              )}
+            </Pressable>
+          )}
           {(authError || errorMessage) && (
             <Text style={styles.error}>{authError ?? errorMessage}</Text>
           )}
@@ -321,23 +359,41 @@ export default function FriendsScreen() {
           }) : undefined}
         />
         {friends.map((friend) => (
-          <ProfileCard
-            key={friend.id}
-            profile={friend}
-            action={party && isLeader && !partyMembers.some((member) => member.id === friend.id) ? 'INVITE' : 'REMOVE'}
-            onAction={() => {
-              if (party && isLeader && !partyMembers.some((member) => member.id === friend.id)) {
-                void run(() => inviteToParty(friend.id));
-              } else {
-                confirmRemove(friend.id, friend.name);
-              }
-            }}
-          />
+          <View key={friend.id}>
+            <ProfileCard
+              profile={friend}
+              action={party && isLeader && !partyMembers.some((member) => member.id === friend.id) ? 'INVITE' : 'REMOVE'}
+              onAction={() => {
+                if (party && isLeader && !partyMembers.some((member) => member.id === friend.id)) {
+                  void run(() => inviteToParty(friend.id));
+                } else {
+                  confirmRemove(friend.id, friend.name);
+                }
+              }}
+            />
+            <Pressable onPress={() => confirmBlock(friend.id, friend.name)} accessibilityRole="button">
+              <Text style={styles.blockAction}>BLOCK PLAYER</Text>
+            </Pressable>
+          </View>
         ))}
         {friends.length === 0 && (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Your roster is ready</Text>
             <Text style={styles.emptyText}>Find a player by browsing active Ascendants, then send a friend request.</Text>
+          </View>
+        )}
+        {blockedUserIds.length > 0 && (
+          <View style={styles.safetyCard}>
+            <Text style={styles.safetyTitle}>BLOCKED PLAYERS</Text>
+            <Text style={styles.safetyText}>Blocked players cannot appear in your roster, invitations, or party chat.</Text>
+            {blockedUserIds.map((blockedId) => (
+              <View key={blockedId} style={styles.blockedRow}>
+                <Text style={styles.blockedId}>PLAYER · {blockedId.slice(0, 8).toUpperCase()}</Text>
+                <Pressable onPress={() => void run(() => unblockPlayer(blockedId))}>
+                  <Text style={styles.unblockAction}>UNBLOCK</Text>
+                </Pressable>
+              </View>
+            ))}
           </View>
         )}
       </ScrollView>
@@ -384,10 +440,19 @@ export default function FriendsScreen() {
                     {messages.map((item) => {
                       const isYou = item.senderId === user?.id;
                       return (
-                        <View key={item.id} style={[styles.messageBubble, isYou && styles.messageBubbleYou]}>
+                        <Pressable
+                          key={item.id}
+                          style={[styles.messageBubble, isYou && styles.messageBubbleYou]}
+                          onLongPress={isYou ? undefined : () => openMessageSafety(
+                            item.id,
+                            item.senderId,
+                            profileById.get(item.senderId)?.name ?? 'this player',
+                          )}
+                          accessibilityHint={isYou ? undefined : 'Long press for report and block options'}
+                        >
                           <Text style={styles.sender}>{isYou ? 'YOU' : (profileById.get(item.senderId)?.name ?? 'ALLY').toUpperCase()}</Text>
                           <Text style={styles.messageText}>{item.text}</Text>
-                        </View>
+                        </Pressable>
                       );
                     })}
                   </View>
@@ -513,9 +578,16 @@ const styles = StyleSheet.create({
   cardAction: { borderRadius: 8, backgroundColor: '#4E479E', paddingHorizontal: 9, paddingVertical: 8, marginLeft: 7 },
   cardActionText: { color: '#FFFFFF', fontSize: 7, fontWeight: '900' },
   declineAction: { alignSelf: 'flex-end', color: '#D47E8F', fontSize: 7, fontWeight: '900', marginBottom: 8, marginRight: 4, padding: 6 },
+  blockAction: { alignSelf: 'flex-end', color: '#B86F80', fontSize: 7, fontWeight: '900', letterSpacing: 0.6, marginBottom: 8, marginRight: 4, padding: 6 },
   inviteActions: { alignItems: 'flex-end', gap: 4 },
   declineInline: { color: '#D47E8F', fontSize: 7, fontWeight: '900', padding: 4 },
   emptyCard: { borderWidth: 1, borderColor: '#34394A', borderStyle: 'dashed', borderRadius: 16, padding: 22, alignItems: 'center' },
+  safetyCard: { marginTop: 18, borderWidth: 1, borderColor: '#473443', borderRadius: 16, backgroundColor: '#17131B', padding: 14 },
+  safetyTitle: { color: '#D58A9A', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  safetyText: { color: '#8D8491', fontSize: 9, lineHeight: 14, marginTop: 4 },
+  blockedRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#342A35', marginTop: 9, paddingTop: 9 },
+  blockedId: { color: '#A8A0AD', fontSize: 8, fontWeight: '800' },
+  unblockAction: { color: '#8B7CFF', fontSize: 8, fontWeight: '900', letterSpacing: 0.7, padding: 5 },
   emptyTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
   emptyText: { color: '#81899B', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 5 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(4,5,10,0.84)' },
