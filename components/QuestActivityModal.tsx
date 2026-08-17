@@ -257,11 +257,12 @@ export default function QuestActivityModal({
 
     // Let the native modal finish dismissing before its parent quest list and
     // reward overlay update. This avoids overlapping Fabric view-tree changes.
+    // Keep a fallback on every platform because clearing the selected quest can
+    // remove the Modal before iOS delivers onDismiss. finishPendingCompletion is
+    // idempotent, so onDismiss can still complete the claim first when it fires.
     pendingCompletion.current = selectedQuest;
+    completionFallback.current = setTimeout(finishPendingCompletion, 400);
     onClose();
-    if (Platform.OS !== 'ios') {
-      completionFallback.current = setTimeout(finishPendingCompletion, 320);
-    }
   }
 
   return (
