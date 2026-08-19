@@ -20,6 +20,15 @@ export type QuestActivity =
       minimumCharacters?: number;
     }
   | {
+      type: 'limitJournal';
+      recommendedMinutes: number;
+      stepMinutes: number;
+      instruction: string;
+      prompt: string;
+      placeholder: string;
+      minimumCharacters?: number;
+    }
+  | {
       type: 'checklist';
       instruction: string;
       items: readonly string[];
@@ -42,10 +51,31 @@ const activities: Record<string, QuestActivity> = {
     'Completed the morning sleep check-in',
   ]),
   'hydration-goal': counter(8, 'glasses', 'Log eight approximately 250 mL glasses to reach two liters.'),
-  'digital-balance': checklist('Review your usage honestly before claiming this quest.', [
-    'Checked today’s social-media usage in phone settings',
-    'Confirmed it stayed below four hours',
+  'digital-balance': {
+    type: 'limitJournal',
+    recommendedMinutes: 240,
+    stepMinutes: 15,
+    instruction: 'Check today’s social-media usage in phone settings, then record it honestly.',
+    prompt: 'You went over today. What contributed to the extra time, and what will you try tomorrow?',
+    placeholder: 'I went over because…\n\nTomorrow I will…',
+    minimumCharacters: 8,
+  },
+  'morning-light': timer(10, 'Step outside during daylight and let your eyes adjust naturally. Do not look directly at the sun.'),
+  'balanced-meal': checklist('Build and enjoy one balanced meal.', [
+    'Include a protein source',
+    'Add fruit or vegetables',
+    'Add a satisfying source of energy',
   ]),
+  'tidy-space': timer(10, 'Choose one small physical or digital space and reset only that area.'),
+  'meaningful-connection': journal(
+    'Who did you connect with, and what made the conversation meaningful?',
+    'I connected with…\n\nIt mattered because…',
+  ),
+  'three-priorities': journal(
+    'What are the three realistic outcomes that matter most today?',
+    '1.\n2.\n3.',
+  ),
+  'stretch-break': timer(8, 'Step away from sitting and gently move your neck, shoulders, hips, and ankles.'),
 
   'warrior-pushups': counter(20, 'reps', 'Count only controlled repetitions. Use an incline or knee variation when needed.'),
   'warrior-squats': counter(3, 'sets', 'Complete one safe set at a time, then log it after your rest.'),
@@ -65,6 +95,9 @@ const activities: Record<string, QuestActivity> = {
     'Rehydrate',
     'Prepare a calm sleep routine',
   ]),
+  'warrior-lunges': counter(20, 'reps', 'Alternate legs and count only controlled repetitions. Hold a stable support if needed.'),
+  'warrior-pull': counter(3, 'sets', 'Use rows, resistance bands, or another safe pulling movement with controlled form.'),
+  'warrior-press': counter(3, 'sets', 'Choose a pressing variation you can perform with stable, controlled form.'),
 
   'scholar-pages': counter(25, 'pages', 'Log focused pages as you finish them, not pages you skim.'),
   'scholar-deep-study': timer(45, 'Choose one subject and remove distractions before beginning.'),
@@ -85,6 +118,16 @@ const activities: Record<string, QuestActivity> = {
     'What will you learn tomorrow, and what does “finished” look like?',
     'Tomorrow I will…\n\nI am finished when…',
   ),
+  'scholar-mind-map': journal(
+    'Place one idea at the center, then connect at least six related details.',
+    'Central idea…\n\n1.\n2.\n3.\n4.\n5.\n6.',
+  ),
+  'scholar-language': timer(15, 'Choose one focused language activity and stay with it for the full session.'),
+  'scholar-organize': checklist('Prepare one focused study space.', [
+    'Clear unrelated clutter',
+    'Organize the materials you need',
+    'Define the next study task',
+  ]),
 
   'monk-breath': timer(5, 'Breathe slowly and let each exhale become a little longer than the inhale.'),
   'monk-stillness': timer(20, 'Notice thoughts and sensations without needing to follow or change them.'),
@@ -105,6 +148,13 @@ const activities: Record<string, QuestActivity> = {
     'I helped by…',
   ),
   'monk-retreat': timer(30, 'Stay with one meditation practice for the full session.'),
+  'monk-body-scan': timer(10, 'Move attention slowly from head to toe and notice sensation without trying to change it.'),
+  'monk-declutter': timer(10, 'Quietly organize one small physical or digital space, then stop when the timer ends.'),
+  'monk-five-senses': checklist('Ground your attention in the present moment.', [
+    'Notice what you can see and hear',
+    'Notice touch, temperature, and movement',
+    'Notice scent and taste without judgment',
+  ]),
 
   'ranger-steps': counter(12000, 'steps', 'Estimate or check your own step counter, then log progress in 1,000-step milestones.', 1000),
   'ranger-run': timer(20, 'Run or jog at a sustainable pace. Pause the timer if you stop for more than a brief crossing.'),
@@ -122,6 +172,9 @@ const activities: Record<string, QuestActivity> = {
     'Record five details you noticed outdoors.',
     '1.\n2.\n3.\n4.\n5.',
   ),
+  'ranger-balance': timer(5, 'Practice both sides near a stable support. Stop if you feel pain or dizziness.'),
+  'ranger-brisk-walk': timer(25, 'Walk at a purposeful pace that still allows comfortable, controlled breathing.'),
+  'ranger-stairs': timer(10, 'Use a safe staircase at a controlled pace. Pause whenever you need recovery.'),
 };
 
 export function getQuestActivity(

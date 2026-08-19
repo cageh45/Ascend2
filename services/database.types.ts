@@ -345,6 +345,7 @@ export type Database = {
           character_class: string
           created_at: string
           display_name: string
+          game_state: Json | null
           handle: string
           id: string
           last_seen_at: string
@@ -359,6 +360,7 @@ export type Database = {
           character_class?: string
           created_at?: string
           display_name?: string
+          game_state?: Json | null
           handle: string
           id: string
           last_seen_at?: string
@@ -373,6 +375,7 @@ export type Database = {
           character_class?: string
           created_at?: string
           display_name?: string
+          game_state?: Json | null
           handle?: string
           id?: string
           last_seen_at?: string

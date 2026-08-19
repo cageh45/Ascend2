@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Image,
   View,
@@ -12,6 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { RootStackParamList } from './navigation/types';
 import { useMusic } from './state/MusicContext';
+import AccountAccessModal from './components/AccountAccessModal';
+import { useAuth } from './state/AuthContext';
 
 const welcomeHero = require('./assets/sprites/hero-violet.png');
 
@@ -19,6 +21,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Welcome'>;
 
 export default function WelcomeScreen({ navigation }: Props) {
   const { playTrack } = useMusic();
+  const { status } = useAuth();
+  const [showSignIn, setShowSignIn] = useState(false);
   useFocusEffect(useCallback(() => playTrack('welcome'), [playTrack]));
 
   return (
@@ -58,7 +62,22 @@ export default function WelcomeScreen({ navigation }: Props) {
             START YOUR JOURNEY
           </Text>
         </Pressable>
+        {status !== 'unconfigured' && (
+          <Pressable
+            style={styles.signInButton}
+            onPress={() => setShowSignIn(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in to a saved account"
+          >
+            <Text style={styles.signInText}>SIGN IN TO SAVED ACCOUNT</Text>
+          </Pressable>
+        )}
       </View>
+      <AccountAccessModal
+        visible={showSignIn}
+        mode="signIn"
+        onClose={() => setShowSignIn(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -149,4 +168,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1,
   },
+  signInButton: { marginTop: 18, paddingVertical: 10, paddingHorizontal: 18 },
+  signInText: { color: '#AAA4FF', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
 });

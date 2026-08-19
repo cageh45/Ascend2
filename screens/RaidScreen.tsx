@@ -20,11 +20,7 @@ import {
   getAvatarEvolution,
 } from '../game/appearanceData';
 import { FriendProfile } from '../data/socialData';
-import {
-  CLASS_COMBAT_KITS,
-  CombatVfx,
-  CoreCombatAction,
-} from '../game/combatData';
+import { CombatVfx, CoreCombatAction, getCombatKit } from '../game/combatData';
 import {
   getAbilityCooldown,
   getAbilityStagger,
@@ -51,6 +47,7 @@ import {
   DungeonId,
   DungeonRoom,
   getDungeon,
+  getDungeonScaling,
 } from '../game/dungeonData';
 import {
   DUNGEON_BOONS,
@@ -155,6 +152,7 @@ export default function RaidScreen() {
     characterName,
     claimRaidVictory,
     completedDungeonIds,
+    dungeonClearCounts,
     equippedGearSetId,
     isRaidRewardAvailable,
     raidWins,
@@ -190,6 +188,7 @@ export default function RaidScreen() {
   const [readyCheckActive, setReadyCheckActive] = useState(false);
   const dungeon = getDungeon(selectedDungeonId);
   const dungeonAffix = getDungeonAffix(dungeon.id);
+  const dungeonScaling = getDungeonScaling(dungeonClearCounts[dungeon.id] ?? 0);
   const raidRewardAvailable = isRaidRewardAvailable(dungeon.id);
   const room = dungeon.rooms[roomIndex];
   const boss = getDungeonCombatant(dungeon, room);
@@ -211,7 +210,6 @@ export default function RaidScreen() {
   const partyLinkLost = partyRaidActive && !fullPartyOnline;
   const appearance = APPEARANCES[appearanceId];
   const character = CHARACTER_CLASSES[characterClass];
-  const combatKit = CLASS_COMBAT_KITS[characterClass];
   const tacticalTrait = {
     Warrior: '25% faster BREAK',
     Scholar: '50% energy-drain resistance',
@@ -221,6 +219,7 @@ export default function RaidScreen() {
   const level = getLevelProgress(totalXp).level;
   const evolution = getAvatarEvolution(characterClass, level);
   const equippedGear = getEquippedGearSet(characterClass, equippedGearSetId);
+  const combatKit = getCombatKit(characterClass, equippedGear.moveSet);
   const skillBonuses = getSkillBonuses(characterClass, unlockedSkillIds);
   const activeAbilities = SKILL_TREES[characterClass].filter(
     (skill) => skill.kind === 'active' && unlockedSkillIds.includes(skill.id),
@@ -242,7 +241,7 @@ export default function RaidScreen() {
   const bossMaxHp = Math.round(
     partyRaidActive && onlineRaid?.bossMaxHp
       ? onlineRaid.bossMaxHp
-      : boss.maxHp * dungeonAffix.hpMultiplier,
+      : boss.maxHp * dungeonAffix.hpMultiplier * dungeonScaling.hpMultiplier,
   );
   const selectedPartyRaidLevelReady =
     level >= getDungeon(selectedPartyRaidId).recommendedLevel;
@@ -612,7 +611,7 @@ export default function RaidScreen() {
     finalVictoryInFlight.current = true;
 
     const modifiedRewardXp = Math.round(
-      (boss.rewardXp * dungeonAffix.rewardMultiplier) / 5,
+      (boss.rewardXp * dungeonAffix.rewardMultiplier * dungeonScaling.rewardMultiplier) / 5,
     ) * 5;
     let earnedReward = false;
     let awardedXp = modifiedRewardXp;
@@ -649,7 +648,7 @@ export default function RaidScreen() {
           : `${finisher} This raid’s co-op reward was already claimed today.`
         : earnedReward
         ? `${finisher} Victory reward: +${modifiedRewardXp} XP!`
-        : `${finisher} Practice victory complete.`,
+        : `${finisher} Practice clear: +${Math.max(5, Math.round(modifiedRewardXp * 0.25 / 5) * 5)} XP!`,
     );
     void Haptics.notificationAsync(
       Haptics.NotificationFeedbackType.Success,
@@ -921,6 +920,7 @@ export default function RaidScreen() {
           bossIntent.damageMultiplier *
           getBossPhaseAttackMultiplier(bossPhase) *
           dungeonAffix.attackMultiplier *
+          dungeonScaling.attackMultiplier *
           (1 - Math.min(0.45, skillBonuses.damageReduction)) *
           (1 - Math.min(0.65, effectiveGuard + runGuardBonus)),
       ),
@@ -1350,7 +1350,11 @@ export default function RaidScreen() {
     setRoomIndex(0);
     setPlayerHp(playerMaxHp);
     setBossHp(
-      Math.round(firstEnemy.maxHp * getDungeonAffix(nextDungeonId).hpMultiplier),
+      Math.round(
+        firstEnemy.maxHp *
+          getDungeonAffix(nextDungeonId).hpMultiplier *
+          getDungeonScaling(dungeonClearCounts[nextDungeonId] ?? 0).hpMultiplier,
+      ),
     );
     setEnergy(startingEnergy);
     setBossTurnNumber(0);
@@ -1485,7 +1489,10 @@ export default function RaidScreen() {
     setRoomIndex(nextIndex);
     setBossHp(
       Math.round(
-        nextEnemy.maxHp * (partyRaidActive ? 1 : dungeonAffix.hpMultiplier),
+        nextEnemy.maxHp *
+          (partyRaidActive
+            ? 1
+            : dungeonAffix.hpMultiplier * dungeonScaling.hpMultiplier),
       ),
     );
     setBossTurnNumber(0);
@@ -1637,6 +1644,7 @@ export default function RaidScreen() {
               {DUNGEONS.map((dungeonItem, dungeonIndex) => {
             const dungeonBoss = getRaidBoss(dungeonItem.bossId);
             const itemAffix = getDungeonAffix(dungeonItem.id);
+            const itemScaling = getDungeonScaling(dungeonClearCounts[dungeonItem.id] ?? 0);
             const levelReady = level >= dungeonItem.recommendedLevel;
             const previousDungeon = DUNGEONS[dungeonIndex - 1];
             const routeReady =
@@ -1683,11 +1691,12 @@ export default function RaidScreen() {
                       {dungeonItem.rooms.filter((candidate) => candidate.kind === 'battle').length + 1} BATTLES
                     </Text>
                     <Text style={styles.dungeonMeta}>BOSS · {dungeonBoss.name.toUpperCase()}</Text>
-                    <Text style={styles.dungeonMeta}>{dungeonBoss.maxHp.toLocaleString()} BOSS HP</Text>
+                    <Text style={styles.dungeonMeta}>RANK {itemScaling.rank}</Text>
+                    <Text style={styles.dungeonMeta}>{Math.round(dungeonBoss.maxHp * itemAffix.hpMultiplier * itemScaling.hpMultiplier).toLocaleString()} BOSS HP</Text>
                     <Text style={styles.dungeonMeta}>
                       {isRaidRewardAvailable(dungeonItem.id)
-                        ? `${dungeonBoss.rewardXp} XP READY`
-                        : 'XP CLAIMED · RESETS NOON'}
+                        ? `${Math.round((dungeonBoss.rewardXp * itemAffix.rewardMultiplier * itemScaling.rewardMultiplier) / 5) * 5} XP READY`
+                        : `${Math.max(5, Math.round((dungeonBoss.rewardXp * itemAffix.rewardMultiplier * itemScaling.rewardMultiplier) * 0.25 / 5) * 5)} PRACTICE XP`}
                     </Text>
                   </View>
                   <View style={[styles.affixPill, { borderColor: `${itemAffix.accent}88` }]}>
@@ -1709,7 +1718,7 @@ export default function RaidScreen() {
                         : '✓ EXPEDITION READY'}
                   </Text>
                   {completed && (
-                    <Text style={[styles.dungeonComplete, { color: dungeonItem.accent }]}>◆ CLEARED</Text>
+                    <Text style={[styles.dungeonComplete, { color: dungeonItem.accent }]}>◆ {dungeonClearCounts[dungeonItem.id] ?? 0} CLEARS</Text>
                   )}
                 </View>
                 {unlocked ? (
@@ -2360,7 +2369,7 @@ export default function RaidScreen() {
                   ? boss.isFinalBoss
                     ? victoryRewardEarned
                       ? `${dungeon.name} is complete. This raid’s daily reward was claimed.`
-                      : `${dungeon.name} is complete. This raid’s XP reward was already claimed today.`
+                      : `${dungeon.name} is complete. Practice XP was awarded; the full chest resets at midnight.`
                     : `${boss.name} is defeated. Your current HP carries into the next room.`
                   : `The party fell in room ${roomIndex + 1}. Restart the dungeon and choose your shrine boon carefully.`}
               </Text>
@@ -2393,7 +2402,7 @@ export default function RaidScreen() {
             <Text style={styles.rewardTitle}>FINAL BOSS CHEST</Text>
             <Text style={styles.rewardText}>
               {raidRewardAvailable
-                ? `${Math.round((getRaidBoss(dungeon.bossId).rewardXp * dungeonAffix.rewardMultiplier) / 5) * 5} XP and +2 to your class stat await at room ${dungeon.rooms.length}.`
+                ? `${Math.round((getRaidBoss(dungeon.bossId).rewardXp * dungeonAffix.rewardMultiplier * dungeonScaling.rewardMultiplier) / 5) * 5} XP and +2 to your class stat await at rank ${dungeonScaling.rank}.`
                 : 'Claimed for this raid today. Other raids still have their own daily rewards.'}
             </Text>
           </View>

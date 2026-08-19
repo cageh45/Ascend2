@@ -26,7 +26,12 @@ type AuthContextValue = {
   user: User | null;
   errorMessage: string | null;
   enableOnlineAccount: () => Promise<boolean>;
-  sendEmailLink: (email: string) => Promise<boolean>;
+  sendEmailCode: (email: string, mode: 'link' | 'signIn') => Promise<boolean>;
+  verifyEmailCode: (
+    email: string,
+    token: string,
+    mode: 'link' | 'signIn',
+  ) => Promise<boolean>;
   deleteOnlineAccount: () => Promise<boolean>;
   signOut: () => Promise<void>;
 };
@@ -76,9 +81,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       try {
         const parsed = new URL(url);
         const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+        const errorDescription =
+          hash.get('error_description') ?? parsed.searchParams.get('error_description');
+        if (errorDescription) throw new Error(decodeURIComponent(errorDescription.replace(/\+/g, ' ')));
         const accessToken = hash.get('access_token');
         const refreshToken = hash.get('refresh_token');
         const code = parsed.searchParams.get('code');
+        const tokenHash = parsed.searchParams.get('token_hash');
+        const type = parsed.searchParams.get('type');
 
         if (accessToken && refreshToken) {
           const { error } = await supabase!.auth.setSession({
@@ -89,6 +99,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
         } else if (code) {
           const { error } = await supabase!.auth.exchangeCodeForSession(code);
           if (error) throw error;
+        } else if (tokenHash && type) {
+          const { error } = await supabase!.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: type as 'email' | 'email_change',
+          });
+          if (error) throw error;
+        } else {
+          throw new Error('This verification link is incomplete. Request a new code in Ascend.');
         }
       } catch (error) {
         setErrorMessage(
@@ -125,25 +143,66 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return true;
   }, [session]);
 
-  const sendEmailLink = useCallback(async (email: string) => {
-    if (!supabase) return false;
+  const sendEmailCode = useCallback(async (
+    email: string,
+    mode: 'link' | 'signIn',
+  ) => {
+    if (!supabase) {
+      setErrorMessage('Online accounts are not configured in this build.');
+      return false;
+    }
     const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) return false;
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+      setErrorMessage('Enter a valid email address.');
+      return false;
+    }
     setErrorMessage(null);
+    setStatus('connecting');
 
-    const { error } = session?.user.is_anonymous
+    const { error } = mode === 'link' && session?.user.is_anonymous
       ? await supabase.auth.updateUser(
           { email: cleanEmail },
           { emailRedirectTo: 'ascend://auth/callback' },
         )
       : await supabase.auth.signInWithOtp({
           email: cleanEmail,
-          options: { emailRedirectTo: 'ascend://auth/callback' },
+          options: {
+            emailRedirectTo: 'ascend://auth/callback',
+            shouldCreateUser: false,
+          },
         });
     if (error) {
+      setStatus(session ? 'authenticated' : 'error');
       setErrorMessage(error.message);
       return false;
     }
+    setStatus(session ? 'authenticated' : 'signedOut');
+    return true;
+  }, [session]);
+
+  const verifyEmailCode = useCallback(async (
+    email: string,
+    token: string,
+    mode: 'link' | 'signIn',
+  ) => {
+    if (!supabase) return false;
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanToken = token.replace(/\s/g, '');
+    if (!cleanEmail || !cleanToken) return false;
+    setStatus('connecting');
+    setErrorMessage(null);
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: mode === 'link' ? 'email_change' : 'email',
+    });
+    if (error) {
+      setStatus(session ? 'authenticated' : 'error');
+      setErrorMessage(error.message);
+      return false;
+    }
+    if (data.session) setSession(data.session);
+    setStatus('authenticated');
     return true;
   }, [session]);
 
@@ -182,11 +241,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user: session?.user ?? null,
       errorMessage,
       enableOnlineAccount,
-      sendEmailLink,
+      sendEmailCode,
+      verifyEmailCode,
       deleteOnlineAccount,
       signOut,
     }),
-    [deleteOnlineAccount, enableOnlineAccount, errorMessage, sendEmailLink, session, signOut, status],
+    [deleteOnlineAccount, enableOnlineAccount, errorMessage, sendEmailCode, session, signOut, status, verifyEmailCode],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

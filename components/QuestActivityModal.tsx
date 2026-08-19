@@ -33,6 +33,7 @@ type QuestProgress = {
   counterValue: number;
   checkedIndices: number[];
   journalDraft: string;
+  actualMinutes: number;
 };
 
 type Props = {
@@ -159,6 +160,10 @@ export default function QuestActivityModal({
         : activity.type === 'journal'
           ? progress.journalDraft.trim().length >=
             (activity.minimumCharacters ?? 1)
+          : activity.type === 'limitJournal'
+            ? progress.actualMinutes > 0 &&
+              (progress.actualMinutes <= activity.recommendedMinutes ||
+                progress.journalDraft.trim().length >= (activity.minimumCharacters ?? 1))
           : progress.checkedIndices.length === activity.items.length;
 
   function startTimer() {
@@ -227,13 +232,21 @@ export default function QuestActivityModal({
     setClaiming(true);
 
     try {
-      if (selectedActivity.type === 'journal') {
+      if (selectedActivity.type === 'journal' ||
+          (selectedActivity.type === 'limitJournal' && progress.actualMinutes > selectedActivity.recommendedMinutes)) {
+        const isLimitEntry = selectedActivity.type === 'limitJournal';
+        const overageMinutes = isLimitEntry
+          ? Math.max(0, progress.actualMinutes - selectedActivity.recommendedMinutes)
+          : undefined;
         const entry: JournalEntry = {
           id: `${Date.now()}-${selectedQuest.id}`,
           questId: selectedQuest.id,
           questTitle: selectedQuest.title,
           note: progress.journalDraft.trim(),
           savedAt: Date.now(),
+          actualMinutes: isLimitEntry ? progress.actualMinutes : undefined,
+          recommendedMinutes: isLimitEntry ? selectedActivity.recommendedMinutes : undefined,
+          overageMinutes,
         };
         const nextEntries = await saveJournalEntries([
           entry,
@@ -393,6 +406,49 @@ export default function QuestActivityModal({
                 </>
               )}
 
+              {activity.type === 'limitJournal' && (
+                <>
+                  <Text style={styles.instruction}>{activity.instruction}</Text>
+                  <View style={styles.limitCard}>
+                    <Text style={styles.limitValue}>{formatMinutes(progress.actualMinutes)}</Text>
+                    <Text style={styles.counterTarget}>TODAY · RECOMMENDED {formatMinutes(activity.recommendedMinutes)}</Text>
+                    <View style={styles.counterActions}>
+                      <Pressable
+                        style={styles.counterButton}
+                        onPress={() => setProgress((current) => ({ ...current, actualMinutes: Math.max(0, current.actualMinutes - activity.stepMinutes) }))}
+                      >
+                        <Text style={styles.counterButtonText}>−</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.counterButton, styles.counterAdd, { backgroundColor: accent }]}
+                        onPress={() => setProgress((current) => ({ ...current, actualMinutes: Math.min(1440, current.actualMinutes + activity.stepMinutes) }))}
+                      >
+                        <Text style={styles.counterAddText}>+{activity.stepMinutes}m</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                  {progress.actualMinutes > activity.recommendedMinutes ? (
+                    <>
+                      <Text style={[styles.overage, { color: accent }]}>OVER BY {formatMinutes(progress.actualMinutes - activity.recommendedMinutes)}</Text>
+                      <Text style={styles.prompt}>{activity.prompt}</Text>
+                      <TextInput
+                        value={progress.journalDraft}
+                        onChangeText={(journalDraft) => setProgress((current) => ({ ...current, journalDraft }))}
+                        style={[styles.journalInput, { borderColor: `${accent}70` }]}
+                        placeholder={activity.placeholder}
+                        placeholderTextColor="#626A7C"
+                        selectionColor={accent}
+                        multiline
+                        textAlignVertical="top"
+                        maxLength={2000}
+                      />
+                    </>
+                  ) : (
+                    <Text style={styles.underLimit}>You’re within today’s recommendation. Keep the honest streak going.</Text>
+                  )}
+                </>
+              )}
+
               {activity.type === 'checklist' && (
                 <>
                   <Text style={styles.instruction}>{activity.instruction}</Text>
@@ -460,6 +516,7 @@ function createInitialProgress(
     counterValue: 0,
     checkedIndices: [],
     journalDraft: '',
+    actualMinutes: activity?.type === 'limitJournal' ? activity.recommendedMinutes : 0,
   };
 }
 
@@ -487,6 +544,10 @@ function restoreProgress(
         : [],
       journalDraft:
         typeof parsed.journalDraft === 'string' ? parsed.journalDraft : '',
+      actualMinutes:
+        typeof parsed.actualMinutes === 'number'
+          ? Math.max(0, Math.min(1440, Math.round(parsed.actualMinutes)))
+          : initial.actualMinutes,
     };
   } catch {
     return initial;
@@ -510,6 +571,12 @@ function formatTimer(seconds: number) {
   return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
 }
 
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours > 0 ? `${hours}h ${String(remainder).padStart(2, '0')}m` : `${remainder}m`;
+}
+
 function formatEntryDate(timestamp: number) {
   return new Date(timestamp).toLocaleDateString([], {
     month: 'short',
@@ -521,6 +588,7 @@ function getIncompleteLabel(type: string) {
   if (type === 'timer') return 'FINISH THE SESSION';
   if (type === 'counter') return 'REACH THE TARGET';
   if (type === 'journal') return 'WRITE YOUR CHECK-IN';
+  if (type === 'limitJournal') return 'LOG TIME OR REFLECT';
   return 'FINISH THE CHECKLIST';
 }
 
@@ -621,6 +689,10 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   counterValue: { color: '#FFFFFF', fontSize: 66, lineHeight: 72, fontWeight: '900' },
+  limitCard: { alignItems: 'center', backgroundColor: '#171B27', borderWidth: 1, borderColor: '#2A3040', borderRadius: 24, marginTop: 22, padding: 22 },
+  limitValue: { color: '#FFFFFF', fontSize: 44, lineHeight: 52, fontWeight: '900' },
+  overage: { textAlign: 'center', fontSize: 11, fontWeight: '900', letterSpacing: 1.1, marginTop: 18, marginBottom: 12 },
+  underLimit: { color: '#67D7B1', textAlign: 'center', fontSize: 12, lineHeight: 18, marginTop: 17 },
   counterTarget: { color: '#858DA0', fontSize: 10, fontWeight: '900', letterSpacing: 1.3 },
   counterActions: { flexDirection: 'row', gap: 12, marginTop: 22 },
   counterButton: {

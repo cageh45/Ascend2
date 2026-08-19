@@ -595,7 +595,7 @@ export default function HomeScreen({ navigation }: Props) {
               </Text>
             </View>
             <Text style={styles.questGroupSubtitle}>
-              Set {dailyQuestSet.index + 1} of 10 · refreshes daily at noon
+              Fresh daily rotation · refreshes at midnight
             </Text>
           </View>
           <Text style={styles.questGroupCount}>

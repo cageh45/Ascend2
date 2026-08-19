@@ -161,6 +161,18 @@ export function getDungeon(id: DungeonId) {
   return DUNGEONS.find((dungeonItem) => dungeonItem.id === id) ?? DUNGEONS[0];
 }
 
+export function getDungeonScaling(clearCount: number) {
+  const clears = Math.max(0, Math.floor(clearCount));
+  const rank = clears + 1;
+  const growth = Math.log2(rank);
+  return {
+    rank,
+    hpMultiplier: 1 + growth * 0.22,
+    attackMultiplier: 1 + growth * 0.14,
+    rewardMultiplier: 1 + growth * 0.2,
+  };
+}
+
 function dungeon(
   id: DungeonId,
   name: string,

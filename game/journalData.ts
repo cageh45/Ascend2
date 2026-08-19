@@ -9,6 +9,9 @@ export type JournalEntry = {
   questTitle: string;
   note: string;
   savedAt: number;
+  actualMinutes?: number;
+  recommendedMinutes?: number;
+  overageMinutes?: number;
 };
 
 export async function loadJournalEntries() {
@@ -53,6 +56,9 @@ function isJournalEntry(value: unknown): value is JournalEntry {
     typeof entry.note === 'string' &&
     entry.note.trim().length > 0 &&
     typeof entry.savedAt === 'number' &&
-    Number.isFinite(entry.savedAt)
+    Number.isFinite(entry.savedAt) &&
+    (entry.actualMinutes === undefined || typeof entry.actualMinutes === 'number') &&
+    (entry.recommendedMinutes === undefined || typeof entry.recommendedMinutes === 'number') &&
+    (entry.overageMinutes === undefined || typeof entry.overageMinutes === 'number')
   );
 }

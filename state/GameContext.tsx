@@ -32,6 +32,13 @@ import {
 import {
   APPEARANCE_IDS,
   AppearanceId,
+  AvatarCustomization,
+  DEFAULT_AVATAR_CUSTOMIZATION,
+  EYE_STYLES,
+  HAIR_COLORS,
+  HAIR_STYLES,
+  NOSE_STYLES,
+  SKIN_TONES,
 } from '../game/appearanceData';
 import { FRIEND_PROFILE_IDS } from '../data/socialData';
 import {
@@ -47,6 +54,9 @@ import {
   RaidRewardLedger,
   recordRaidReward,
 } from '../game/raidRewardData';
+import { useAuth } from './AuthContext';
+import { supabase } from '../services/supabase';
+import type { Json } from '../services/database.types';
 
 const STORAGE_KEY = '@ascend/game-state-v1';
 
@@ -56,12 +66,14 @@ type GameState = {
   characterClass: CharacterClassName;
   characterName: string;
   appearanceId: AppearanceId;
+  avatarCustomization: AvatarCustomization;
   totalXp: number;
   completedQuestIds: QuestId[];
   questDay: string;
   statGains: Record<StatName, number>;
   raidWins: number;
   completedDungeonIds: DungeonId[];
+  dungeonClearCounts: Partial<Record<DungeonId, number>>;
   raidRewardDays: RaidRewardLedger;
   unlockedSkillIds: string[];
   questStreak: number;
@@ -98,11 +110,13 @@ type GameContextValue = {
   characterClass: CharacterClassName;
   characterName: string;
   appearanceId: AppearanceId;
+  avatarCustomization: AvatarCustomization;
   totalXp: number;
   completedQuestIds: QuestId[];
   stats: Record<StatName, number>;
   raidWins: number;
   completedDungeonIds: DungeonId[];
+  dungeonClearCounts: Partial<Record<DungeonId, number>>;
   questCycleKey: string;
   unlockedSkillIds: string[];
   skillPointsAvailable: number;
@@ -116,8 +130,15 @@ type GameContextValue = {
   equippedGearSetId: GearSetId;
   partyName: string | null;
   partyChatMessages: PartyChatMessage[];
-  completeOnboarding: (characterClass: CharacterClassName) => void;
-  updateCharacter: (name: string, appearanceId: AppearanceId) => void;
+  completeOnboarding: (
+    characterClass: CharacterClassName,
+    customization?: AvatarCustomization,
+  ) => void;
+  updateCharacter: (
+    name: string,
+    appearanceId: AppearanceId,
+    customization?: AvatarCustomization,
+  ) => void;
   toggleQuest: (questId: QuestId) => void;
   completeQuest: (questId: QuestId) => void;
   unlockSkill: (skillId: string) => void;
@@ -180,12 +201,14 @@ function createInitialState(): GameState {
     characterClass: 'Warrior',
     characterName: 'Ascendant',
     appearanceId: 'violet',
+    avatarCustomization: { ...DEFAULT_AVATAR_CUSTOMIZATION },
     totalXp: 0,
     completedQuestIds: [],
     questDay: getQuestCycleKey(),
     statGains: { ...zeroStatGains },
     raidWins: 0,
     completedDungeonIds: [],
+    dungeonClearCounts: {},
     raidRewardDays: {},
     unlockedSkillIds: [],
     questStreak: 0,
@@ -208,6 +231,44 @@ function isCharacterClass(value: unknown): value is CharacterClassName {
 
 function isAppearance(value: unknown): value is AppearanceId {
   return APPEARANCE_IDS.includes(value as AppearanceId);
+}
+
+function restoreAvatarCustomization(value: unknown): AvatarCustomization {
+  const candidate = value && typeof value === 'object'
+    ? value as Partial<AvatarCustomization>
+    : {};
+  return {
+    eyeStyle: EYE_STYLES.includes(candidate.eyeStyle as AvatarCustomization['eyeStyle'])
+      ? candidate.eyeStyle as AvatarCustomization['eyeStyle']
+      : DEFAULT_AVATAR_CUSTOMIZATION.eyeStyle,
+    noseStyle: NOSE_STYLES.includes(candidate.noseStyle as AvatarCustomization['noseStyle'])
+      ? candidate.noseStyle as AvatarCustomization['noseStyle']
+      : DEFAULT_AVATAR_CUSTOMIZATION.noseStyle,
+    hairStyle: HAIR_STYLES.includes(candidate.hairStyle as AvatarCustomization['hairStyle'])
+      ? candidate.hairStyle as AvatarCustomization['hairStyle']
+      : DEFAULT_AVATAR_CUSTOMIZATION.hairStyle,
+    hairColor: HAIR_COLORS.includes(candidate.hairColor as AvatarCustomization['hairColor'])
+      ? candidate.hairColor as AvatarCustomization['hairColor']
+      : DEFAULT_AVATAR_CUSTOMIZATION.hairColor,
+    skinTone: SKIN_TONES.includes(candidate.skinTone as AvatarCustomization['skinTone'])
+      ? candidate.skinTone as AvatarCustomization['skinTone']
+      : DEFAULT_AVATAR_CUSTOMIZATION.skinTone,
+  };
+}
+
+function restoreDungeonClearCounts(value: unknown, completedIds: unknown) {
+  const counts: Partial<Record<DungeonId, number>> = {};
+  for (const dungeon of DUNGEONS) {
+    const count = value && typeof value === 'object'
+      ? (value as Record<string, unknown>)[dungeon.id]
+      : undefined;
+    if (typeof count === 'number' && Number.isFinite(count) && count > 0) {
+      counts[dungeon.id] = Math.floor(count);
+    } else if (Array.isArray(completedIds) && completedIds.includes(dungeon.id)) {
+      counts[dungeon.id] = 1;
+    }
+  }
+  return counts;
 }
 
 function restoreState(value: string | null): GameState {
@@ -257,6 +318,7 @@ function restoreState(value: string | null): GameState {
       appearanceId: isAppearance(parsed.appearanceId)
         ? parsed.appearanceId
         : initial.appearanceId,
+      avatarCustomization: restoreAvatarCustomization(parsed.avatarCustomization),
       totalXp:
         typeof parsed.totalXp === 'number' && parsed.totalXp >= 0
           ? parsed.totalXp
@@ -288,6 +350,10 @@ function restoreState(value: string | null): GameState {
             ),
           )
         : [],
+      dungeonClearCounts: restoreDungeonClearCounts(
+        parsed.dungeonClearCounts,
+        parsed.completedDungeonIds,
+      ),
       raidRewardDays: restoreRaidRewardDays(parsed),
       unlockedSkillIds: Array.isArray(parsed.unlockedSkillIds)
         ? Array.from(
@@ -393,10 +459,12 @@ function restoreRaidRewardDays(
 const GameContext = createContext<GameContextValue | null>(null);
 
 export function GameProvider({ children }: PropsWithChildren) {
+  const { status: authStatus, user } = useAuth();
   const [state, setState] = useState<GameState>(createInitialState);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [questCycleKey, setQuestCycleKey] = useState(getQuestCycleKey);
+  const [cloudReadyUserId, setCloudReadyUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -451,6 +519,60 @@ export function GameProvider({ children }: PropsWithChildren) {
     }
   }, [hydrated, state]);
 
+  useEffect(() => {
+    if (!hydrated || authStatus !== 'authenticated' || !user || !supabase) {
+      setCloudReadyUserId(null);
+      return;
+    }
+    let cancelled = false;
+    const client = supabase;
+    setCloudReadyUserId(null);
+    void client
+      .from('profiles')
+      .select('game_state')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(async ({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          setStorageError(`Cloud save could not be loaded: ${error.message}`);
+          return;
+        }
+        const cloudState = data?.game_state;
+        if (cloudState && typeof cloudState === 'object' && !Array.isArray(cloudState)) {
+          setState(restoreState(JSON.stringify(cloudState)));
+        } else {
+          const { error: saveError } = await client
+            .from('profiles')
+            .update({ game_state: state as unknown as Json })
+            .eq('id', user.id);
+          if (saveError && !cancelled) {
+            setStorageError(`Cloud save could not be created: ${saveError.message}`);
+            return;
+          }
+        }
+        if (!cancelled) setCloudReadyUserId(user.id);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hydrated, user?.id]);
+
+  useEffect(() => {
+    if (!supabase || !user || cloudReadyUserId !== user.id) return;
+    const client = supabase;
+    const timer = setTimeout(() => {
+      void client
+        .from('profiles')
+        .update({ game_state: state as unknown as Json })
+        .eq('id', user.id)
+        .then(({ error }) => {
+          if (error) setStorageError(`Cloud save failed: ${error.message}`);
+        });
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [cloudReadyUserId, state, user?.id]);
+
   const value = useMemo<GameContextValue>(() => {
     const dailyQuestIds = new Set<QuestId>(
       getDailyQuests(state.characterClass).map((quest) => quest.id),
@@ -482,11 +604,13 @@ export function GameProvider({ children }: PropsWithChildren) {
       characterClass: state.characterClass,
       characterName: state.characterName,
       appearanceId: state.appearanceId,
+      avatarCustomization: state.avatarCustomization,
       totalXp: state.totalXp,
       completedQuestIds: currentQuestIds,
       stats,
       raidWins: state.raidWins,
       completedDungeonIds: state.completedDungeonIds,
+      dungeonClearCounts: state.dungeonClearCounts,
       questCycleKey,
       unlockedSkillIds,
       skillPointsAvailable: skillPoints.available,
@@ -501,7 +625,7 @@ export function GameProvider({ children }: PropsWithChildren) {
       equippedGearSetId: state.equippedGearSetId,
       partyName: state.partyName,
       partyChatMessages: state.partyChatMessages,
-      completeOnboarding: (characterClass) => {
+      completeOnboarding: (characterClass, customization) => {
         if (!CHARACTER_CLASSES[characterClass]) {
           return;
         }
@@ -510,6 +634,9 @@ export function GameProvider({ children }: PropsWithChildren) {
           ...current,
           onboardingComplete: true,
           characterClass,
+          avatarCustomization: customization
+            ? restoreAvatarCustomization(customization)
+            : current.avatarCustomization,
           unlockedSkillIds:
             current.characterClass === characterClass
               ? current.unlockedSkillIds
@@ -524,7 +651,7 @@ export function GameProvider({ children }: PropsWithChildren) {
               : DEFAULT_GEAR_SET_IDS[characterClass],
         }));
       },
-      updateCharacter: (name, appearanceId) => {
+      updateCharacter: (name, appearanceId, customization) => {
         if (!isAppearance(appearanceId)) {
           return;
         }
@@ -534,6 +661,9 @@ export function GameProvider({ children }: PropsWithChildren) {
           ...current,
           characterName,
           appearanceId,
+          avatarCustomization: customization
+            ? restoreAvatarCustomization(customization)
+            : current.avatarCustomization,
         }));
       },
       toggleQuest: (questId) => {
@@ -710,6 +840,9 @@ export function GameProvider({ children }: PropsWithChildren) {
             today,
           );
           const focus = CHARACTER_CLASSES[current.characterClass].focus;
+          const xpEarned = canClaimReward
+            ? rewardXp
+            : Math.max(5, Math.round(rewardXp * 0.25 / 5) * 5);
 
           return {
             ...current,
@@ -717,25 +850,23 @@ export function GameProvider({ children }: PropsWithChildren) {
             raidRewardDays: canClaimReward
               ? recordRaidReward(current.raidRewardDays, dungeonId, today)
               : current.raidRewardDays,
-            totalXp: current.totalXp + (canClaimReward ? rewardXp : 0),
+            totalXp: current.totalXp + xpEarned,
             questWeek: getQuestWeekKey(),
             weeklyXp:
               (current.questWeek === getQuestWeekKey()
                 ? current.weeklyXp
-                : 0) + (canClaimReward ? rewardXp : 0),
+                : 0) + xpEarned,
             statGains: canClaimReward
               ? {
                   ...current.statGains,
                   [focus]: current.statGains[focus] + 2,
                 }
               : current.statGains,
-            activityHistory: canClaimReward
-              ? addActivity(
-                  current.activityHistory,
-                  `${bossName} defeated`,
-                  rewardXp,
-                )
-              : current.activityHistory,
+            activityHistory: addActivity(
+              current.activityHistory,
+              canClaimReward ? `${bossName} defeated` : `${bossName} practice clear`,
+              xpEarned,
+            ),
           };
         });
 
@@ -743,17 +874,16 @@ export function GameProvider({ children }: PropsWithChildren) {
       },
       markDungeonComplete: (dungeonId) => {
         if (!DUNGEONS.some((dungeon) => dungeon.id === dungeonId)) return;
-        setState((current) =>
-          current.completedDungeonIds.includes(dungeonId)
-            ? current
-            : {
-                ...current,
-                completedDungeonIds: [
-                  ...current.completedDungeonIds,
-                  dungeonId,
-                ],
-              },
-        );
+        setState((current) => ({
+          ...current,
+          completedDungeonIds: current.completedDungeonIds.includes(dungeonId)
+            ? current.completedDungeonIds
+            : [...current.completedDungeonIds, dungeonId],
+          dungeonClearCounts: {
+            ...current.dungeonClearCounts,
+            [dungeonId]: (current.dungeonClearCounts[dungeonId] ?? 0) + 1,
+          },
+        }));
       },
       addFriend: (friendId) => {
         const valid = FRIEND_PROFILE_IDS.includes(friendId);

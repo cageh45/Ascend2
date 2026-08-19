@@ -106,6 +106,12 @@ export default function QuestJournalModal({ accent, onClose, visible }: Props) {
                     </Text>
                   </View>
                   <Text style={styles.entryNote}>{entry.note}</Text>
+                  {typeof entry.overageMinutes === 'number' && entry.overageMinutes > 0 && (
+                    <View style={styles.overageRow}>
+                      <Text style={styles.overageLabel}>RECOMMENDED {formatDuration(entry.recommendedMinutes ?? 0)}</Text>
+                      <Text style={styles.overageValue}>OVER BY {formatDuration(entry.overageMinutes)}</Text>
+                    </View>
+                  )}
                 </View>
               ))}
             </ScrollView>
@@ -124,6 +130,12 @@ function formatJournalDate(timestamp: number) {
     hour: 'numeric',
     minute: '2-digit',
   }).toUpperCase();
+}
+
+function formatDuration(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours}H ${rest}M` : `${rest}M`;
 }
 
 const styles = StyleSheet.create({
@@ -208,4 +220,7 @@ const styles = StyleSheet.create({
   entryQuest: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
   entryDate: { fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   entryNote: { color: '#C7CCDA', fontSize: 13, lineHeight: 20 },
+  overageRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2A3040' },
+  overageLabel: { color: '#747C90', fontSize: 8, fontWeight: '900' },
+  overageValue: { color: '#FF9E78', fontSize: 8, fontWeight: '900' },
 });

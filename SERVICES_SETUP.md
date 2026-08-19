@@ -11,6 +11,12 @@ linking in Authentication settings. Add `ascend://auth/callback` to the allowed
 redirect URLs. Before a public launch, enable CAPTCHA/bot protection and review
 the project's email, rate-limit, backup, and retention settings.
 
+Configure a custom SMTP provider for production email delivery. Supabase's
+default hosted sender is restricted and may only deliver to project-team
+addresses. The checked-in magic-link and email-change templates use
+`{{ .Token }}` so Ascend can verify codes in-app without depending on a mail
+client opening a deep link.
+
 Install or run the Supabase CLI, authenticate it, and apply the migration:
 
 ```sh

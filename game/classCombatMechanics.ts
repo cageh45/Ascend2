@@ -59,7 +59,7 @@ export function resolveClassAction(
   } else if (characterClass === 'Ranger') {
     if (action.id === 'quick') {
       nextStatus = { id: 'marked', turns: 3, potency: 35 };
-      message = 'HUNTER’S MARK applied · Piercing Shot deals +35%';
+      message = 'HUNTER’S MARK applied · the next power attack deals +35%';
     } else if (action.id === 'power' && activeStatus.id === 'marked') {
       damageMultiplier = 1 + activeStatus.potency / 100;
       nextStatus = EMPTY_CLASS_STATUS;

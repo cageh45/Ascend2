@@ -1,20 +1,25 @@
 import { ImageSourcePropType } from 'react-native';
 
+import { auditGearMoveSetBalance } from './combatBalance';
 import { CharacterClassName } from './gameData';
 
 export type GearSetId =
   | 'warrior-nightguard'
   | 'warrior-dawnforged'
   | 'warrior-voidbreaker'
+  | 'warrior-stormguard'
   | 'scholar-archive'
   | 'scholar-stormcall'
   | 'scholar-chronarch'
+  | 'scholar-riftweaver'
   | 'monk-lotus'
   | 'monk-crimson-tempest'
   | 'monk-jade-dragon'
+  | 'monk-sunspire'
   | 'ranger-wayfinder'
   | 'ranger-frostwind'
-  | 'ranger-starfall';
+  | 'ranger-starfall'
+  | 'ranger-galehunter';
 
 export type GearRarity = 'Starter' | 'Rare' | 'Legendary';
 
@@ -32,6 +37,26 @@ export type GearSetDefinition = {
   maxHpBonus: number;
   accent: string;
   source: ImageSourcePropType;
+  moveSet?: GearMoveSet;
+};
+
+export type GearMoveSet = {
+  identity: string;
+  actions: {
+    quick: GearActionOverride;
+    power: GearActionOverride;
+    focus: GearActionOverride;
+  };
+};
+
+export type GearActionOverride = {
+  name: string;
+  icon: string;
+  damageMultiplier?: number;
+  healingMultiplier?: number;
+  energyCostDelta?: number;
+  energyGainDelta?: number;
+  guardDelta?: number;
 };
 
 export const GEAR_SETS: Record<
@@ -84,6 +109,21 @@ export const GEAR_SETS: Record<
       accent: '#B36CFF',
       source: require('../assets/sprites/gear-warrior-voidbreaker.png'),
     },
+    {
+      id: 'warrior-stormguard', characterClass: 'Warrior', name: 'Stormguard Set',
+      armorName: 'Stormguard Plate', weaponName: 'Thunderhead Maul', rarity: 'Legendary',
+      unlockLevel: 10, description: 'Cobalt plate grounds the storm before returning it through a crushing hammer.',
+      bonusText: '+220 HP · +16% raid damage', damageBonus: 0.16, maxHpBonus: 220,
+      accent: '#5BCBFF', source: require('../assets/sprites/gear-warrior-stormguard.png'),
+      moveSet: {
+        identity: 'Storm guard · crushing BREAK chains',
+        actions: {
+          quick: { name: 'Static Sweep', icon: '⚡', damageMultiplier: 0.9, energyGainDelta: 4 },
+          power: { name: 'Thunderfall', icon: '🔨', damageMultiplier: 1.12, energyCostDelta: 10, guardDelta: 0.02 },
+          focus: { name: 'Grounding Field', icon: '🛡️', healingMultiplier: 0.75, energyGainDelta: 4, guardDelta: 0.08 },
+        },
+      },
+    },
   ],
   Scholar: [
     {
@@ -130,6 +170,21 @@ export const GEAR_SETS: Record<
       maxHpBonus: 120,
       accent: '#F2C96D',
       source: require('../assets/sprites/gear-scholar-chronarch.png'),
+    },
+    {
+      id: 'scholar-riftweaver', characterClass: 'Scholar', name: 'Riftweaver Set',
+      armorName: 'Riftweaver Mantle', weaponName: 'Orbiting Riftblade', rarity: 'Legendary',
+      unlockLevel: 10, description: 'A ring-blade focus folds distance into a precise arcane edge.',
+      bonusText: '+145 HP · +18% raid damage', damageBonus: 0.18, maxHpBonus: 145,
+      accent: '#49E4DF', source: require('../assets/sprites/gear-scholar-riftweaver.png'),
+      moveSet: {
+        identity: 'Rift control · high-risk spell loops',
+        actions: {
+          quick: { name: 'Orbit Cut', icon: '◉', energyGainDelta: 2 },
+          power: { name: 'Event Horizon', icon: '🌀', damageMultiplier: 1.12, energyCostDelta: 10 },
+          focus: { name: 'Fold Time', icon: '⌛', healingMultiplier: 0.7, energyGainDelta: 8, guardDelta: -0.05 },
+        },
+      },
     },
   ],
   Monk: [
@@ -178,6 +233,21 @@ export const GEAR_SETS: Record<
       accent: '#79D3A4',
       source: require('../assets/sprites/gear-monk-jade-dragon.png'),
     },
+    {
+      id: 'monk-sunspire', characterClass: 'Monk', name: 'Sunspire Set',
+      armorName: 'Sunspire Vestments', weaponName: 'Dawnwheel Polearm', rarity: 'Legendary',
+      unlockLevel: 10, description: 'Radiant battle robes channel breath through a sun-disc polearm.',
+      bonusText: '+205 HP · +14% raid damage', damageBonus: 0.14, maxHpBonus: 205,
+      accent: '#FFBE45', source: require('../assets/sprites/gear-monk-sunspire.png'),
+      moveSet: {
+        identity: 'Solar reach · healing attack rhythm',
+        actions: {
+          quick: { name: 'Dawnwheel Arc', icon: '☀️', healingMultiplier: 1.2 },
+          power: { name: 'Zenith Strike', icon: '🔥', damageMultiplier: 1.08, healingMultiplier: 1.1, energyCostDelta: 5 },
+          focus: { name: 'Sunrise Form', icon: '🌅', healingMultiplier: 1.15, energyGainDelta: -5, guardDelta: -0.05 },
+        },
+      },
+    },
   ],
   Ranger: [
     {
@@ -225,8 +295,39 @@ export const GEAR_SETS: Record<
       accent: '#A977FF',
       source: require('../assets/sprites/gear-ranger-starfall.png'),
     },
+    {
+      id: 'ranger-galehunter', characterClass: 'Ranger', name: 'Galehunter Set',
+      armorName: 'Galehunter Wind-Silk', weaponName: 'Twin Crescent Crossbows', rarity: 'Legendary',
+      unlockLevel: 10, description: 'Wind-silk armor and paired crossbows trade defense for relentless tempo.',
+      bonusText: '+155 HP · +18% raid damage', damageBonus: 0.18, maxHpBonus: 155,
+      accent: '#A8F0A3', source: require('../assets/sprites/gear-ranger-galehunter.png'),
+      moveSet: {
+        identity: 'Twin volleys · relentless momentum',
+        actions: {
+          quick: { name: 'Crescent Flurry', icon: '➶', damageMultiplier: 1.03, energyGainDelta: 3, guardDelta: -0.02 },
+          power: { name: 'Crosswind Burst', icon: '💨', damageMultiplier: 1.1, energyCostDelta: 8 },
+          focus: { name: 'Slipstream', icon: '🍃', healingMultiplier: 0.72, energyGainDelta: 6, guardDelta: 0.05 },
+        },
+      },
+    },
   ],
 };
+
+if (__DEV__) {
+  const balanceIssues = Object.entries(GEAR_SETS).flatMap(
+    ([characterClass, sets]) =>
+      sets.flatMap((set) => {
+        if (!set.moveSet) return [];
+        return auditGearMoveSetBalance(
+          characterClass as CharacterClassName,
+          set.moveSet,
+        ).issues.map((issue) => `${set.name}: ${issue}`);
+      }),
+  );
+  if (balanceIssues.length > 0) {
+    console.warn(`Gear move balance warnings:\n${balanceIssues.join('\n')}`);
+  }
+}
 
 export const DEFAULT_GEAR_SET_IDS: Record<CharacterClassName, GearSetId> = {
   Warrior: 'warrior-nightguard',

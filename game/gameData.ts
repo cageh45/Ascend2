@@ -135,6 +135,36 @@ export const SHARED_QUESTS: readonly QuestDefinition[] = [
     stat: 'mindfulness',
     difficulty: 'Core',
   },
+  {
+    id: 'morning-light', icon: '☀️', title: 'Get 10 minutes of daylight',
+    description: 'Step outside early and let natural light start your day.', reward: 45,
+    stat: 'vitality', difficulty: 'Quick',
+  },
+  {
+    id: 'balanced-meal', icon: '🥗', title: 'Build one colorful meal',
+    description: 'Include a protein, produce, and a satisfying source of energy.', reward: 55,
+    stat: 'vitality', difficulty: 'Core',
+  },
+  {
+    id: 'tidy-space', icon: '✨', title: 'Reset one space for 10 minutes',
+    description: 'Clear a small area that will make the rest of your day easier.', reward: 45,
+    stat: 'mindfulness', difficulty: 'Quick',
+  },
+  {
+    id: 'meaningful-connection', icon: '💬', title: 'Make one meaningful connection',
+    description: 'Check in with someone and give the conversation your full attention.', reward: 60,
+    stat: 'mindfulness', difficulty: 'Core',
+  },
+  {
+    id: 'three-priorities', icon: '🧭', title: 'Choose your top 3 priorities',
+    description: 'Write three realistic outcomes that would make today count.', reward: 45,
+    stat: 'intelligence', difficulty: 'Quick',
+  },
+  {
+    id: 'stretch-break', icon: '🤸', title: 'Take an 8-minute stretch break',
+    description: 'Step away from sitting and gently move through your comfortable range.', reward: 40,
+    stat: 'vitality', difficulty: 'Quick',
+  },
 ] as const;
 
 export const CLASS_QUESTS: Record<
@@ -192,6 +222,21 @@ export const CLASS_QUESTS: Record<
       description: 'Stretch, hydrate, and prepare for a full night of rest.', reward: 55,
       stat: 'mindfulness', difficulty: 'Core',
     },
+    {
+      id: 'warrior-lunges', icon: '🦵', title: 'Complete 20 controlled lunges',
+      description: 'Alternate sides and use support whenever balance needs it.', reward: 55,
+      stat: 'strength', difficulty: 'Core',
+    },
+    {
+      id: 'warrior-pull', icon: '🪢', title: 'Finish 3 pulling sets',
+      description: 'Train your back with rows, bands, or another controlled variation.', reward: 70,
+      stat: 'strength', difficulty: 'Core',
+    },
+    {
+      id: 'warrior-press', icon: '🎯', title: 'Finish 3 pressing sets',
+      description: 'Use a safe push-up, dumbbell, band, or machine variation.', reward: 70,
+      stat: 'strength', difficulty: 'Core',
+    },
   ],
   Scholar: [
     {
@@ -242,6 +287,21 @@ export const CLASS_QUESTS: Record<
     {
       id: 'scholar-plan', icon: '🗺️', title: 'Plan tomorrow’s learning',
       description: 'Choose the next topic and define a clear finish line.', reward: 45,
+      stat: 'mindfulness', difficulty: 'Quick',
+    },
+    {
+      id: 'scholar-mind-map', icon: '🕸️', title: 'Create a concept map',
+      description: 'Connect one central idea to at least six related details.', reward: 60,
+      stat: 'intelligence', difficulty: 'Core',
+    },
+    {
+      id: 'scholar-language', icon: '🌐', title: 'Practice a language for 15 minutes',
+      description: 'Use focused listening, speaking, reading, or vocabulary practice.', reward: 55,
+      stat: 'intelligence', difficulty: 'Core',
+    },
+    {
+      id: 'scholar-organize', icon: '🗂️', title: 'Organize your study materials',
+      description: 'Clear one workspace and prepare what your next session needs.', reward: 45,
       stat: 'mindfulness', difficulty: 'Quick',
     },
   ],
@@ -296,6 +356,21 @@ export const CLASS_QUESTS: Record<
       description: 'Stay with one practice for the full session.', reward: 110,
       stat: 'mindfulness', difficulty: 'Challenge',
     },
+    {
+      id: 'monk-body-scan', icon: '🌊', title: 'Complete a 10-minute body scan',
+      description: 'Move your attention slowly from head to toe without judgment.', reward: 50,
+      stat: 'mindfulness', difficulty: 'Quick',
+    },
+    {
+      id: 'monk-declutter', icon: '🍃', title: 'Clear one source of mental clutter',
+      description: 'Spend ten quiet minutes organizing one small physical or digital space.', reward: 50,
+      stat: 'mindfulness', difficulty: 'Quick',
+    },
+    {
+      id: 'monk-five-senses', icon: '🌿', title: 'Practice five-senses grounding',
+      description: 'Pause and deliberately notice what each sense is experiencing.', reward: 40,
+      stat: 'mindfulness', difficulty: 'Quick',
+    },
   ],
   Ranger: [
     {
@@ -348,6 +423,21 @@ export const CLASS_QUESTS: Record<
       description: 'Pause outdoors and record five things you notice.', reward: 45,
       stat: 'mindfulness', difficulty: 'Quick',
     },
+    {
+      id: 'ranger-balance', icon: '🪨', title: 'Practice balance for 5 minutes',
+      description: 'Use a safe stance near support and train both sides evenly.', reward: 45,
+      stat: 'endurance', difficulty: 'Quick',
+    },
+    {
+      id: 'ranger-brisk-walk', icon: '🚶', title: 'Take a 25-minute brisk walk',
+      description: 'Choose a purposeful pace that still lets you breathe comfortably.', reward: 65,
+      stat: 'endurance', difficulty: 'Core',
+    },
+    {
+      id: 'ranger-stairs', icon: '🪜', title: 'Move on stairs for 10 minutes',
+      description: 'Use a safe staircase and keep a steady, controlled pace.', reward: 60,
+      stat: 'endurance', difficulty: 'Core',
+    },
   ],
 };
 
@@ -359,10 +449,10 @@ export const QUESTS: readonly QuestDefinition[] = [
   ...CLASS_QUESTS.Ranger,
 ];
 
-export const DAILY_QUEST_SET_COUNT = 10;
-export const DAILY_QUEST_RESET_HOUR = 12;
-export const DAILY_CLASS_QUEST_COUNT = 8;
-export const DAILY_SHARED_QUEST_COUNT = 4;
+export const DAILY_QUEST_SET_COUNT = 140;
+export const DAILY_QUEST_RESET_HOUR = 0;
+export const DAILY_CLASS_QUEST_COUNT = 6;
+export const DAILY_SHARED_QUEST_COUNT = 6;
 export const DAILY_QUEST_COUNT =
   DAILY_CLASS_QUEST_COUNT + DAILY_SHARED_QUEST_COUNT;
 
@@ -410,14 +500,18 @@ export function getDailyQuestSet(
   const cycleNumber = Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
   const index = positiveModulo(cycleNumber, DAILY_QUEST_SET_COUNT);
   const classOffset = CHARACTER_CLASS_NAMES.indexOf(characterClass);
+  // Six selections advance through 13-item pools. The one-item buffer lets
+  // every objective change on consecutive days while preserving a long cycle.
+  const classStart = cycleNumber * DAILY_CLASS_QUEST_COUNT;
   const classQuests = rotateTake(
     CLASS_QUESTS[characterClass],
-    index * 3,
+    classStart,
     DAILY_CLASS_QUEST_COUNT,
   );
+  const sharedStart = cycleNumber * DAILY_SHARED_QUEST_COUNT + classOffset;
   const sharedQuests = rotateTake(
     SHARED_QUESTS,
-    index * 2 + classOffset,
+    sharedStart,
     DAILY_SHARED_QUEST_COUNT,
   );
   return {
