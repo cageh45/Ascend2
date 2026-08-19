@@ -58,8 +58,33 @@ export type OnlineRaid = {
   dungeonId: string;
   state: 'lobby' | 'active' | 'victory' | 'defeat' | 'abandoned';
   hostId: string;
+  bossHp: number;
+  bossMaxHp: number;
   participants: RaidParticipant[];
 };
+
+export type VerifiedRaidAction = {
+  damage: number;
+  bossHp: number;
+  bossMaxHp: number;
+  state: OnlineRaid['state'];
+  serverVerified: boolean;
+};
+
+export type VerifiedRaidReward = {
+  rewardXp: number;
+  alreadyClaimed: boolean;
+  dungeonId: string;
+  serverVerified: boolean;
+};
+
+export type ReportCategory =
+  | 'harassment'
+  | 'hate'
+  | 'sexual'
+  | 'spam'
+  | 'unsafe'
+  | 'other';
 
 type SocialContextValue = {
   available: boolean;
@@ -73,6 +98,7 @@ type SocialContextValue = {
   incomingPartyInvites: { id: string; partyName: string; inviterName: string }[];
   party: PartyState | null;
   messages: PartyMessage[];
+  blockedUserIds: string[];
   onlineRaid: OnlineRaid | null;
   refresh: () => Promise<void>;
   searchPlayers: (query: string) => Promise<FriendProfile[]>;
@@ -82,6 +108,9 @@ type SocialContextValue = {
   declineFriendRequest: (requestId: string) => Promise<boolean>;
   respondPartyInvite: (inviteId: string, accept: boolean) => Promise<boolean>;
   removeFriend: (profileId: string) => Promise<boolean>;
+  blockPlayer: (profileId: string) => Promise<boolean>;
+  unblockPlayer: (profileId: string) => Promise<boolean>;
+  reportMessage: (messageId: string, category: ReportCategory) => Promise<boolean>;
   createParty: (name: string) => Promise<boolean>;
   joinParty: (code: string) => Promise<boolean>;
   leaveParty: () => Promise<boolean>;
@@ -91,7 +120,9 @@ type SocialContextValue = {
   createRaid: (dungeonId: string) => Promise<boolean>;
   setRaidReady: (ready: boolean) => Promise<boolean>;
   launchRaid: () => Promise<boolean>;
-  reportRaidResult: (outcome: 'victory' | 'defeat', damage: number) => Promise<void>;
+  performRaidAction: (actionKind: 'quick' | 'power' | 'focus' | 'ability') => Promise<VerifiedRaidAction | null>;
+  claimVerifiedRaidReward: () => Promise<VerifiedRaidReward | null>;
+  reportRaidResult: (outcome: 'defeat', damage: number) => Promise<void>;
 };
 
 const SocialContext = createContext<SocialContextValue | null>(null);
@@ -119,6 +150,7 @@ export function SocialProvider({ children }: PropsWithChildren) {
   >([]);
   const [party, setParty] = useState<PartyState | null>(null);
   const [messages, setMessages] = useState<PartyMessage[]>([]);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [onlineRaid, setOnlineRaid] = useState<OnlineRaid | null>(null);
   const presenceChannel = useRef<RealtimeChannel | null>(null);
   const databaseChannel = useRef<RealtimeChannel | null>(null);
@@ -139,7 +171,7 @@ export function SocialProvider({ children }: PropsWithChildren) {
       });
       throwFirstError(syncResult.error);
 
-      const [profileResult, friendshipsResult, requestsResult, outgoingRequestsResult, membershipResult, partyInvitesResult] =
+      const [profileResult, friendshipsResult, requestsResult, outgoingRequestsResult, membershipResult, partyInvitesResult, blocksResult] =
         await Promise.all([
           supabase.from('profiles').select('*').eq('id', user.id).single(),
           supabase.from('friendships').select('*').or(`user_low.eq.${user.id},user_high.eq.${user.id}`),
@@ -147,8 +179,11 @@ export function SocialProvider({ children }: PropsWithChildren) {
           supabase.from('friend_requests').select('*').eq('sender_id', user.id).eq('status', 'pending'),
           supabase.from('party_members').select('*').eq('user_id', user.id).maybeSingle(),
           supabase.from('party_invites').select('*').eq('invited_user_id', user.id).eq('status', 'pending'),
+          supabase.from('social_blocks').select('blocked_id').eq('blocker_id', user.id),
         ]);
-      throwFirstError(profileResult.error, friendshipsResult.error, requestsResult.error, outgoingRequestsResult.error, membershipResult.error, partyInvitesResult.error);
+      throwFirstError(profileResult.error, friendshipsResult.error, requestsResult.error, outgoingRequestsResult.error, membershipResult.error, partyInvitesResult.error, blocksResult.error);
+      const blockedIds = new Set((blocksResult.data ?? []).map((row) => row.blocked_id));
+      setBlockedUserIds([...blockedIds]);
 
       const friendIds = (friendshipsResult.data ?? []).map((row) =>
         row.user_low === user.id ? row.user_high : row.user_low,
@@ -185,8 +220,8 @@ export function SocialProvider({ children }: PropsWithChildren) {
       throwFirstError(inviteParties.error, inviteSenders.error);
 
       setProfile(profileResult.data);
-      setFriends((friendProfiles.data ?? []).map((row) => toFriend(row)));
-      setSuggestions((suggestionResult.data ?? []).map((row) => toFriend(row)));
+      setFriends((friendProfiles.data ?? []).filter((row) => !blockedIds.has(row.id)).map((row) => toFriend(row)));
+      setSuggestions((suggestionResult.data ?? []).filter((row) => !blockedIds.has(row.id)).map((row) => toFriend(row)));
       setIncomingRequests(
         (requestsResult.data ?? []).flatMap((request) => {
           const sender = requestProfiles.data?.find((row) => row.id === request.sender_id);
@@ -224,13 +259,13 @@ export function SocialProvider({ children }: PropsWithChildren) {
         supabase.from('parties').select('*').eq('id', partyId).single(),
         supabase.from('party_roster').select('*').eq('party_id', partyId),
         supabase.from('party_messages').select('*').eq('party_id', partyId).order('created_at', { ascending: true }).limit(100),
-        supabase.from('raid_sessions').select('*').eq('party_id', partyId).in('state', ['lobby', 'active']).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('raid_sessions').select('*').eq('party_id', partyId).in('state', ['lobby', 'active', 'victory']).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       ]);
       throwFirstError(partyResult.error, rosterResult.error, messageResult.error, raidResult.error);
       if (!partyResult.data) throw new Error('Party data could not be loaded.');
       setParty(toParty(partyResult.data, rosterResult.data ?? [], user.id));
       setMessages(
-        (messageResult.data ?? []).map((message) => ({
+        (messageResult.data ?? []).filter((message) => !blockedIds.has(message.sender_id)).map((message) => ({
           id: message.id,
           senderId: message.sender_id,
           text: message.body,
@@ -249,6 +284,8 @@ export function SocialProvider({ children }: PropsWithChildren) {
           dungeonId: raidResult.data.dungeon_id,
           state: raidResult.data.state,
           hostId: raidResult.data.host_id,
+          bossHp: raidResult.data.boss_hp,
+          bossMaxHp: raidResult.data.boss_max_hp,
           participants: (participantResult.data ?? []).map((row) => ({
             userId: row.user_id,
             ready: row.ready,
@@ -387,12 +424,71 @@ export function SocialProvider({ children }: PropsWithChildren) {
         result_limit: 30,
       });
       if (result.error) throw new Error(result.error.message);
-      return (result.data ?? []).map((row) => toFriend(row));
+      const blocked = new Set(blockedUserIds);
+      return (result.data ?? [])
+        .filter((row) => !blocked.has(row.id))
+        .map((row) => toFriend(row));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Player search failed.');
       return [];
     }
-  }, [user]);
+  }, [blockedUserIds, user]);
+
+  const performRaidAction = useCallback(async (
+    actionKind: 'quick' | 'power' | 'focus' | 'ability',
+  ): Promise<VerifiedRaidAction | null> => {
+    if (!onlineRaid) return null;
+    setErrorMessage(null);
+    try {
+      const result = await requireSupabase().rpc('perform_raid_action', {
+        requested_session_id: onlineRaid.id,
+        requested_action_kind: actionKind,
+      });
+      if (result.error) throw new Error(result.error.message);
+      const data = result.data as Record<string, unknown> | null;
+      if (!data) throw new Error('The raid server returned no action state.');
+      const action: VerifiedRaidAction = {
+        damage: Number(data.damage ?? 0),
+        bossHp: Number(data.boss_hp ?? 0),
+        bossMaxHp: Number(data.boss_max_hp ?? 0),
+        state: String(data.state ?? 'active') as OnlineRaid['state'],
+        serverVerified: data.server_verified === true,
+      };
+      setOnlineRaid((current) => current ? {
+        ...current,
+        bossHp: action.bossHp,
+        bossMaxHp: action.bossMaxHp,
+        state: action.state,
+      } : current);
+      void refresh();
+      return action;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Raid action failed.');
+      return null;
+    }
+  }, [onlineRaid, refresh]);
+
+  const claimVerifiedRaidReward = useCallback(async (): Promise<VerifiedRaidReward | null> => {
+    if (!onlineRaid) return null;
+    setErrorMessage(null);
+    try {
+      const result = await requireSupabase().rpc('claim_verified_raid_reward', {
+        requested_session_id: onlineRaid.id,
+      });
+      if (result.error) throw new Error(result.error.message);
+      const data = result.data as Record<string, unknown> | null;
+      if (!data) throw new Error('The raid server returned no reward state.');
+      return {
+        rewardXp: Number(data.reward_xp ?? 0),
+        alreadyClaimed: data.already_claimed === true,
+        dungeonId: String(data.dungeon_id ?? ''),
+        serverVerified: data.server_verified === true,
+      };
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Raid reward could not be claimed.');
+      return null;
+    }
+  }, [onlineRaid]);
 
   const value = useMemo<SocialContextValue>(() => ({
     available: Boolean(supabase && user),
@@ -406,6 +502,7 @@ export function SocialProvider({ children }: PropsWithChildren) {
     incomingPartyInvites,
     party,
     messages,
+    blockedUserIds,
     onlineRaid,
     refresh,
     searchPlayers,
@@ -424,6 +521,16 @@ export function SocialProvider({ children }: PropsWithChildren) {
       })),
     removeFriend: (profileId) => mutate(() =>
       requireSupabase().rpc('remove_friend', { target_user: profileId })),
+    blockPlayer: (profileId) => mutate(() =>
+      requireSupabase().rpc('block_player', { target_user: profileId })),
+    unblockPlayer: (profileId) => mutate(() =>
+      requireSupabase().rpc('unblock_player', { target_user: profileId })),
+    reportMessage: (messageId, category) => mutate(() =>
+      requireSupabase().rpc('report_party_message', {
+        requested_message_id: messageId,
+        requested_category: category,
+        requested_details: '',
+      })),
     createParty: (name) => mutate(() =>
       requireSupabase().rpc('create_party_with_leader', { party_name: name.trim() })),
     joinParty: (code) => mutate(() =>
@@ -449,6 +556,8 @@ export function SocialProvider({ children }: PropsWithChildren) {
       onlineRaid
         ? mutate(() => requireSupabase().rpc('launch_raid_session', { requested_session_id: onlineRaid.id }))
         : Promise.resolve(false),
+    performRaidAction,
+    claimVerifiedRaidReward,
     reportRaidResult: async (outcome, damage) => {
       if (!onlineRaid) return;
       await mutate(() => requireSupabase().rpc('complete_raid_session', {
@@ -457,7 +566,7 @@ export function SocialProvider({ children }: PropsWithChildren) {
         requested_damage: Math.max(0, Math.round(damage)),
       }));
     },
-  }), [errorMessage, friends, incomingPartyInvites, incomingRequests, loading, messages, mutate, onlineRaid, outgoingRequests, party, profile, refresh, searchPlayers, suggestions, user]);
+  }), [blockedUserIds, claimVerifiedRaidReward, errorMessage, friends, incomingPartyInvites, incomingRequests, loading, messages, mutate, onlineRaid, outgoingRequests, party, performRaidAction, profile, refresh, searchPlayers, suggestions, user]);
 
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;
 }

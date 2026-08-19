@@ -18,6 +18,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import QuestActivityModal from '../components/QuestActivityModal';
+import QuestJournalModal from '../components/QuestJournalModal';
+import ProgressionRewardModal, {
+  ProgressionReward,
+} from '../components/ProgressionRewardModal';
 import {
   APPEARANCE_IDS,
   APPEARANCES,
@@ -27,23 +31,28 @@ import {
 import { getEquippedGearSet } from '../game/gearData';
 import {
   CHARACTER_CLASSES,
-  CLASS_QUESTS,
   getAttributeRank,
   getBaseStats,
-  getDailyQuests,
+  getDailyQuestSet,
   getLevelProgress,
   getQuestProgressionReward,
   QuestDifficulty,
   QuestDefinition,
-  SHARED_QUESTS,
   StatName,
 } from '../game/gameData';
 import { getQuestActivity, QuestActivity } from '../game/questActivityData';
+import {
+  getCombatRating,
+  getFeaturedQuestIds,
+  getNextMilestone,
+} from '../game/progressionData';
 import { MainTabParamList } from '../navigation/types';
 import { useGame } from '../state/GameContext';
 import { HOME_MUSIC } from '../game/musicData';
 import { useMusic } from '../state/MusicContext';
 import GameIcon from '../components/GameIcon';
+import { getWeeklyArc, WEEKLY_QUEST_TARGET } from '../game/weeklyData';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'HomeTab'>;
 
@@ -67,11 +76,16 @@ export default function HomeScreen({ navigation }: Props) {
     completedQuestIds,
     equippedGearSetId,
     raidWins,
+    questCycleKey,
     questStreak,
     recentActivity,
     skillPointsAvailable,
     stats,
     totalXp,
+    unlockedSkillIds,
+    weeklyQuestCount,
+    weeklyXp,
+    questWeekKey,
     updateCharacter,
   } = useGame();
   const { playTrack } = useMusic();
@@ -88,15 +102,30 @@ export default function HomeScreen({ navigation }: Props) {
     a === character.focus ? -1 : b === character.focus ? 1 : 0,
   );
   const equippedGear = getEquippedGearSet(characterClass, equippedGearSetId);
-  const classQuests = CLASS_QUESTS[characterClass];
-  const dailyQuests = useMemo(
-    () => getDailyQuests(characterClass),
-    [characterClass],
+  const combatRating = getCombatRating(
+    characterClass,
+    levelProgress.level,
+    stats,
+    equippedGear,
+    unlockedSkillIds.length,
+  );
+  const nextMilestone = getNextMilestone(characterClass, levelProgress.level);
+  const weeklyArc = getWeeklyArc(characterClass, questWeekKey);
+  const weeklyProgress = Math.min(1, weeklyQuestCount / WEEKLY_QUEST_TARGET);
+  const reduceMotion = useReducedMotion();
+  const dailyQuestSet = useMemo(
+    () => getDailyQuestSet(characterClass),
+    [characterClass, questCycleKey],
+  );
+  const { classQuests, sharedQuests, quests: dailyQuests } = dailyQuestSet;
+  const featuredQuestIds = useMemo(
+    () => new Set(getFeaturedQuestIds(classQuests, sharedQuests)),
+    [classQuests, sharedQuests],
   );
   const completedClassQuests = classQuests.filter((quest) =>
     completedQuestIds.includes(quest.id),
   ).length;
-  const completedSharedQuests = SHARED_QUESTS.filter((quest) =>
+  const completedSharedQuests = sharedQuests.filter((quest) =>
     completedQuestIds.includes(quest.id),
   ).length;
   const [customizing, setCustomizing] = useState(false);
@@ -110,12 +139,22 @@ export default function HomeScreen({ navigation }: Props) {
   const feedbackY = useRef(new Animated.Value(-12)).current;
   const [feedback, setFeedback] = useState<string | null>(null);
   const [activeQuest, setActiveQuest] = useState<QuestDefinition | null>(null);
+  const [journalVisible, setJournalVisible] = useState(false);
+  const [progressionReward, setProgressionReward] =
+    useState<ProgressionReward | null>(null);
 
   useFocusEffect(
     useCallback(() => playTrack(HOME_MUSIC[characterClass]), [characterClass, playTrack]),
   );
 
   useEffect(() => {
+    if (reduceMotion) {
+      heroFloat.setValue(0);
+      auraPulse.setValue(0.45);
+      orbitSpin.setValue(0);
+      return;
+    }
+
     const floating = Animated.loop(
       Animated.sequence([
         Animated.timing(heroFloat, {
@@ -166,7 +205,7 @@ export default function HomeScreen({ navigation }: Props) {
       pulsing.stop();
       orbiting.stop();
     };
-  }, [auraPulse, heroFloat, orbitSpin]);
+  }, [auraPulse, heroFloat, orbitSpin, reduceMotion]);
 
   const auraScale = auraPulse.interpolate({
     inputRange: [0, 1],
@@ -205,7 +244,29 @@ export default function HomeScreen({ navigation }: Props) {
       characterClass,
       questStreak,
     );
+    const nextTotalXp = totalXp + progression.xp;
+    const nextStats = {
+      ...stats,
+      [quest.stat]: stats[quest.stat] + progression.statGain,
+    };
+    const nextLevel = getLevelProgress(nextTotalXp).level;
+    const nextRating = getCombatRating(
+      characterClass,
+      nextLevel,
+      nextStats,
+      equippedGear,
+      unlockedSkillIds.length,
+    );
     completeQuest(quest.id);
+    setProgressionReward({
+      quest,
+      xp: progression.xp,
+      statGain: progression.statGain,
+      previousLevel: levelProgress.level,
+      nextLevel,
+      previousRating: combatRating.total,
+      nextRating: nextRating.total,
+    });
 
     setFeedback(`QUEST COMPLETE  ·  +${progression.xp} XP  ·  ${quest.stat.toUpperCase()} +${progression.statGain}`);
     feedbackOpacity.setValue(0);
@@ -391,6 +452,23 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         </View>
 
+        <View style={styles.powerCard}>
+          <View style={styles.powerIdentity}>
+            <GameIcon token="combat-crown" size={46} />
+            <View>
+              <Text style={styles.powerEyebrow}>COMBAT RATING</Text>
+              <Text style={[styles.powerValue, { color: character.color }]}>
+                {combatRating.total.toLocaleString()}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.powerMilestone}>
+            <Text style={styles.powerMilestoneLabel}>{nextMilestone.title}</Text>
+            <Text style={styles.powerMilestoneTitle}>LEVEL {nextMilestone.level}</Text>
+            <Text style={styles.powerMilestoneText}>{nextMilestone.detail}</Text>
+          </View>
+        </View>
+
         <View style={styles.statsGrid}>
           {statOrder.map((stat, index) => (
             <Stat
@@ -417,7 +495,76 @@ export default function HomeScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        <View style={[styles.questJournalBase, styles.questJournalCard]}>
+        <View style={[styles.dailyFocusCard, { borderColor: `${character.color}66` }]}>
+          <View style={styles.dailyFocusHeading}>
+            <GameIcon token="combat-target" size={34} />
+            <View style={styles.dailyFocusCopy}>
+              <Text style={[styles.dailyFocusTitle, { color: character.color }]}>TODAY’S MAIN PATH</Text>
+              <Text style={styles.dailyFocusText}>
+                Complete the three marked quests for a balanced session. The other{' '}
+                {Math.max(0, dailyQuests.length - featuredQuestIds.size)} are optional bonus objectives.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.dailyFocusProgress}>
+            {[...featuredQuestIds].map((questId) => (
+              <View
+                key={questId}
+                style={[
+                  styles.dailyFocusNode,
+                  completedQuestIds.includes(questId) && {
+                    backgroundColor: character.color,
+                    borderColor: character.color,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.weeklyArcCard}>
+          <View style={styles.weeklyArcTop}>
+            <View style={styles.weeklyArcIcon}>
+              <GameIcon token={character.icon} size={34} />
+            </View>
+            <View style={styles.weeklyArcCopy}>
+              <Text style={styles.weeklyArcEyebrow}>WEEKLY STORY ARC</Text>
+              <Text style={styles.weeklyArcTitle}>{weeklyArc.title}</Text>
+              <Text style={styles.weeklyArcObjective}>{weeklyArc.objective}</Text>
+            </View>
+            <Text style={[styles.weeklyArcCount, { color: character.color }]}>
+              {Math.min(weeklyQuestCount, WEEKLY_QUEST_TARGET)}/{WEEKLY_QUEST_TARGET}
+            </Text>
+          </View>
+          <View style={styles.weeklyArcTrack}>
+            <View
+              style={[
+                styles.weeklyArcFill,
+                {
+                  width: `${weeklyProgress * 100}%`,
+                  backgroundColor: character.color,
+                },
+              ]}
+            />
+          </View>
+          <View style={styles.weeklyArcMilestones}>
+            <Text style={styles.weeklyArcMeta}>5 · MOMENTUM</Text>
+            <Text style={styles.weeklyArcMeta}>12 · DISCIPLINE</Text>
+            <Text style={styles.weeklyArcMeta}>20 · MASTERY</Text>
+          </View>
+          <Text style={styles.weeklyArcXp}>{weeklyXp.toLocaleString()} XP EARNED THIS WEEK</Text>
+        </View>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.questJournalBase,
+            styles.questJournalCard,
+            pressed && styles.questJournalPressed,
+          ]}
+          onPress={() => setJournalVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Open saved quest journal"
+        >
           <View style={styles.questJournalHeader}>
             <View style={styles.questJournalIdentity}>
               <GameIcon token="quest-notes" size={42} />
@@ -426,7 +573,7 @@ export default function HomeScreen({ navigation }: Props) {
                 <Text style={styles.questJournalTitle}>Ascend Quest Journal</Text>
               </View>
             </View>
-            <Text style={styles.localOnlyBadge}>NO PHONE DATA</Text>
+            <Text style={styles.localOnlyBadge}>OPEN LOG</Text>
           </View>
           <Text style={styles.questJournalMessage}>
             Every daily objective is completed inside Ascend. Open a quest to use its timer,
@@ -437,7 +584,7 @@ export default function HomeScreen({ navigation }: Props) {
             <Text style={styles.questTool}>COUNTERS</Text>
             <Text style={styles.questTool}>CHECK-INS</Text>
           </View>
-        </View>
+        </Pressable>
 
         <View style={styles.questGroupHeader}>
           <View>
@@ -448,7 +595,7 @@ export default function HomeScreen({ navigation }: Props) {
               </Text>
             </View>
             <Text style={styles.questGroupSubtitle}>
-              Built around {character.focus} progression
+              Fresh daily rotation · refreshes at midnight
             </Text>
           </View>
           <Text style={styles.questGroupCount}>
@@ -473,6 +620,7 @@ export default function HomeScreen({ navigation }: Props) {
               statGain={progression.statGain}
               reward={`+${progression.xp} XP`}
               activity={getQuestActivity(quest)}
+              featured={featuredQuestIds.has(quest.id)}
               completed={completedQuestIds.includes(quest.id)}
               onToggle={() => handleQuestPress(quest)}
               accent={character.color}
@@ -493,11 +641,11 @@ export default function HomeScreen({ navigation }: Props) {
             </Text>
           </View>
           <Text style={styles.questGroupCount}>
-            {completedSharedQuests}/{SHARED_QUESTS.length}
+            {completedSharedQuests}/{sharedQuests.length}
           </Text>
         </View>
 
-        {SHARED_QUESTS.map((quest) => {
+        {sharedQuests.map((quest) => {
           const progression = getQuestProgressionReward(
             quest,
             characterClass,
@@ -514,6 +662,7 @@ export default function HomeScreen({ navigation }: Props) {
               statGain={progression.statGain}
               reward={`+${progression.xp} XP`}
               activity={getQuestActivity(quest)}
+              featured={featuredQuestIds.has(quest.id)}
               completed={completedQuestIds.includes(quest.id)}
               onToggle={() => handleQuestPress(quest)}
               accent={appearance.accent}
@@ -601,6 +750,19 @@ export default function HomeScreen({ navigation }: Props) {
             ? getQuestProgressionReward(activeQuest, characterClass, questStreak).statGain
             : 1
         }
+      />
+
+      <QuestJournalModal
+        visible={journalVisible}
+        accent={appearance.accent}
+        onClose={() => setJournalVisible(false)}
+      />
+
+      <ProgressionRewardModal
+        reward={progressionReward}
+        accent={character.color}
+        characterClass={characterClass}
+        onClose={() => setProgressionReward(null)}
       />
 
       <Modal
@@ -793,6 +955,7 @@ function Quest({
   stat,
   statGain,
   activity,
+  featured,
   reward,
   completed,
   onToggle,
@@ -805,6 +968,7 @@ function Quest({
   stat: StatName;
   statGain: number;
   activity?: QuestActivity;
+  featured: boolean;
   reward: string;
   completed: boolean;
   onToggle: () => void;
@@ -844,6 +1008,9 @@ function Quest({
             {difficulty.toUpperCase()}
           </Text>
         </View>
+        {featured && !completed && (
+          <Text style={[styles.featuredQuest, { color: accent }]}>MAIN PATH</Text>
+        )}
         <Text style={styles.questDescription} numberOfLines={2}>
           {description}
         </Text>
@@ -1279,6 +1446,167 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     marginTop: 4,
   },
+  powerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#292F41',
+    borderRadius: 18,
+    backgroundColor: '#10141F',
+    padding: 14,
+    marginBottom: 10,
+  },
+  powerIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingRight: 14,
+  },
+  powerEyebrow: {
+    color: '#788197',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  powerValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  powerMilestone: {
+    flex: 1,
+    borderLeftWidth: 1,
+    borderLeftColor: '#2C3244',
+    paddingLeft: 14,
+  },
+  powerMilestoneLabel: {
+    color: '#788197',
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  powerMilestoneTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  powerMilestoneText: {
+    color: '#9AA3B7',
+    fontSize: 9,
+    lineHeight: 13,
+    marginTop: 3,
+  },
+  dailyFocusCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    backgroundColor: '#121621',
+    padding: 14,
+    marginBottom: 12,
+  },
+  dailyFocusHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+  },
+  dailyFocusCopy: { flex: 1 },
+  dailyFocusTitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  dailyFocusText: {
+    color: '#969EB1',
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  dailyFocusProgress: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  dailyFocusNode: {
+    flex: 1,
+    height: 7,
+    borderWidth: 1,
+    borderColor: '#3A4155',
+    borderRadius: 5,
+    backgroundColor: '#202536',
+  },
+  weeklyArcCard: {
+    backgroundColor: '#111521',
+    borderWidth: 1,
+    borderColor: '#31384B',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  weeklyArcTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  weeklyArcIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    backgroundColor: '#1B2030',
+  },
+  weeklyArcCopy: { flex: 1 },
+  weeklyArcEyebrow: {
+    color: '#8B7CFF',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  weeklyArcTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  weeklyArcObjective: {
+    color: '#929BAD',
+    fontSize: 9,
+    lineHeight: 14,
+    marginTop: 3,
+  },
+  weeklyArcCount: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  weeklyArcTrack: {
+    height: 8,
+    borderRadius: 5,
+    overflow: 'hidden',
+    backgroundColor: '#292E3E',
+    marginTop: 13,
+  },
+  weeklyArcFill: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  weeklyArcMilestones: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 7,
+  },
+  weeklyArcMeta: {
+    color: '#6F788C',
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 0.45,
+  },
+  weeklyArcXp: {
+    color: '#AAB2C2',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+    marginTop: 10,
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1414,6 +1742,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.7,
   },
+  featuredQuest: {
+    alignSelf: 'flex-start',
+    marginTop: 3,
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
   questDescription: {
     color: '#747C90',
     fontSize: 10,
@@ -1456,6 +1791,9 @@ const styles = StyleSheet.create({
   questJournalCard: {
     borderColor: '#3B3566',
     backgroundColor: '#141326',
+  },
+  questJournalPressed: {
+    opacity: 0.82,
   },
   questJournalHeader: {
     flexDirection: 'row',

@@ -21,8 +21,9 @@ game works without platform health permissions or usage-access privileges.
 ## Configure services
 
 Copy `.env.example` to `.env`, connect a Supabase project, apply the checked-in
-migration, and create a development build. The app remains usable
-offline and hides its Friends tab when the public Supabase variables are absent.
+migrations and Edge Function, and create a development build. The app remains
+usable offline; the Friends tab shows clear setup guidance when the public
+Supabase variables are absent.
 
 See [SERVICES_SETUP.md](./SERVICES_SETUP.md) for the exact setup and the release
 work that still requires Expo, Apple, Google, and Supabase project ownership.

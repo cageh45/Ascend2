@@ -16,10 +16,15 @@ import * as Haptics from 'expo-haptics';
 import GameIcon from './GameIcon';
 
 import type { QuestDefinition } from '../game/gameData';
+import { getQuestCycleKey } from '../game/gameData';
+import {
+  JournalEntry,
+  loadJournalEntries,
+  saveJournalEntries,
+} from '../game/journalData';
 import { getQuestActivity } from '../game/questActivityData';
 
 const PROGRESS_PREFIX = '@ascend/quest-activity-v1';
-const JOURNAL_KEY = '@ascend/quest-journal-v1';
 
 type QuestProgress = {
   timerEndAt: number | null;
@@ -28,14 +33,7 @@ type QuestProgress = {
   counterValue: number;
   checkedIndices: number[];
   journalDraft: string;
-};
-
-type JournalEntry = {
-  id: string;
-  questId: string;
-  questTitle: string;
-  note: string;
-  savedAt: number;
+  actualMinutes: number;
 };
 
 type Props = {
@@ -67,9 +65,11 @@ export default function QuestActivityModal({
   const [storageError, setStorageError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const claimInFlight = useRef(false);
+  const pendingCompletion = useRef<QuestDefinition | null>(null);
+  const completionFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const progressKey = quest
-    ? `${PROGRESS_PREFIX}:${getDayKey()}:${quest.id}`
+    ? `${PROGRESS_PREFIX}:${getQuestCycleKey()}:${quest.id}`
     : null;
   const lastEntry = useMemo(
     () => journalEntries.find((entry) => entry.questId === quest?.id),
@@ -87,12 +87,12 @@ export default function QuestActivityModal({
 
     void Promise.all([
       AsyncStorage.getItem(progressKey),
-      AsyncStorage.getItem(JOURNAL_KEY),
+      loadJournalEntries(),
     ])
       .then(([storedProgress, storedJournal]) => {
         if (cancelled) return;
         setProgress(restoreProgress(storedProgress, activity));
-        setJournalEntries(restoreJournal(storedJournal));
+        setJournalEntries(storedJournal);
         setHydrated(true);
       })
       .catch(() => {
@@ -107,6 +107,26 @@ export default function QuestActivityModal({
       cancelled = true;
     };
   }, [activity, progressKey, quest, visible]);
+
+  useEffect(
+    () => () => {
+      if (completionFallback.current) clearTimeout(completionFallback.current);
+    },
+    [],
+  );
+
+  function finishPendingCompletion() {
+    if (!pendingCompletion.current) return;
+    const completedQuest = pendingCompletion.current;
+    pendingCompletion.current = null;
+    if (completionFallback.current) {
+      clearTimeout(completionFallback.current);
+      completionFallback.current = null;
+    }
+    claimInFlight.current = false;
+    setClaiming(false);
+    onComplete(completedQuest);
+  }
 
   useEffect(() => {
     if (!visible || !hydrated || !progressKey) return;
@@ -140,6 +160,10 @@ export default function QuestActivityModal({
         : activity.type === 'journal'
           ? progress.journalDraft.trim().length >=
             (activity.minimumCharacters ?? 1)
+          : activity.type === 'limitJournal'
+            ? progress.actualMinutes > 0 &&
+              (progress.actualMinutes <= activity.recommendedMinutes ||
+                progress.journalDraft.trim().length >= (activity.minimumCharacters ?? 1))
           : progress.checkedIndices.length === activity.items.length;
 
   function startTimer() {
@@ -208,17 +232,27 @@ export default function QuestActivityModal({
     setClaiming(true);
 
     try {
-      if (selectedActivity.type === 'journal') {
+      if (selectedActivity.type === 'journal' ||
+          (selectedActivity.type === 'limitJournal' && progress.actualMinutes > selectedActivity.recommendedMinutes)) {
+        const isLimitEntry = selectedActivity.type === 'limitJournal';
+        const overageMinutes = isLimitEntry
+          ? Math.max(0, progress.actualMinutes - selectedActivity.recommendedMinutes)
+          : undefined;
         const entry: JournalEntry = {
           id: `${Date.now()}-${selectedQuest.id}`,
           questId: selectedQuest.id,
           questTitle: selectedQuest.title,
           note: progress.journalDraft.trim(),
           savedAt: Date.now(),
+          actualMinutes: isLimitEntry ? progress.actualMinutes : undefined,
+          recommendedMinutes: isLimitEntry ? selectedActivity.recommendedMinutes : undefined,
+          overageMinutes,
         };
-        const nextEntries = [entry, ...journalEntries].slice(0, 100);
+        const nextEntries = await saveJournalEntries([
+          entry,
+          ...journalEntries,
+        ]);
         setJournalEntries(nextEntries);
-        await AsyncStorage.setItem(JOURNAL_KEY, JSON.stringify(nextEntries));
       }
       await AsyncStorage.removeItem(progressKey);
     } catch {
@@ -234,10 +268,14 @@ export default function QuestActivityModal({
       Haptics.NotificationFeedbackType.Success,
     ).catch(() => undefined);
 
-    // Dismiss the native modal before its parent quest list changes. Updating
-    // both native view trees in one frame can destabilize Fabric on devices.
+    // Let the native modal finish dismissing before its parent quest list and
+    // reward overlay update. This avoids overlapping Fabric view-tree changes.
+    // Keep a fallback on every platform because clearing the selected quest can
+    // remove the Modal before iOS delivers onDismiss. finishPendingCompletion is
+    // idempotent, so onDismiss can still complete the claim first when it fires.
+    pendingCompletion.current = selectedQuest;
+    completionFallback.current = setTimeout(finishPendingCompletion, 400);
     onClose();
-    requestAnimationFrame(() => onComplete(selectedQuest));
   }
 
   return (
@@ -245,6 +283,7 @@ export default function QuestActivityModal({
       visible={visible}
       transparent
       animationType="slide"
+      onDismiss={finishPendingCompletion}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
@@ -367,6 +406,49 @@ export default function QuestActivityModal({
                 </>
               )}
 
+              {activity.type === 'limitJournal' && (
+                <>
+                  <Text style={styles.instruction}>{activity.instruction}</Text>
+                  <View style={styles.limitCard}>
+                    <Text style={styles.limitValue}>{formatMinutes(progress.actualMinutes)}</Text>
+                    <Text style={styles.counterTarget}>TODAY · RECOMMENDED {formatMinutes(activity.recommendedMinutes)}</Text>
+                    <View style={styles.counterActions}>
+                      <Pressable
+                        style={styles.counterButton}
+                        onPress={() => setProgress((current) => ({ ...current, actualMinutes: Math.max(0, current.actualMinutes - activity.stepMinutes) }))}
+                      >
+                        <Text style={styles.counterButtonText}>−</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.counterButton, styles.counterAdd, { backgroundColor: accent }]}
+                        onPress={() => setProgress((current) => ({ ...current, actualMinutes: Math.min(1440, current.actualMinutes + activity.stepMinutes) }))}
+                      >
+                        <Text style={styles.counterAddText}>+{activity.stepMinutes}m</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                  {progress.actualMinutes > activity.recommendedMinutes ? (
+                    <>
+                      <Text style={[styles.overage, { color: accent }]}>OVER BY {formatMinutes(progress.actualMinutes - activity.recommendedMinutes)}</Text>
+                      <Text style={styles.prompt}>{activity.prompt}</Text>
+                      <TextInput
+                        value={progress.journalDraft}
+                        onChangeText={(journalDraft) => setProgress((current) => ({ ...current, journalDraft }))}
+                        style={[styles.journalInput, { borderColor: `${accent}70` }]}
+                        placeholder={activity.placeholder}
+                        placeholderTextColor="#626A7C"
+                        selectionColor={accent}
+                        multiline
+                        textAlignVertical="top"
+                        maxLength={2000}
+                      />
+                    </>
+                  ) : (
+                    <Text style={styles.underLimit}>You’re within today’s recommendation. Keep the honest streak going.</Text>
+                  )}
+                </>
+              )}
+
               {activity.type === 'checklist' && (
                 <>
                   <Text style={styles.instruction}>{activity.instruction}</Text>
@@ -434,6 +516,7 @@ function createInitialProgress(
     counterValue: 0,
     checkedIndices: [],
     journalDraft: '',
+    actualMinutes: activity?.type === 'limitJournal' ? activity.recommendedMinutes : 0,
   };
 }
 
@@ -461,19 +544,13 @@ function restoreProgress(
         : [],
       journalDraft:
         typeof parsed.journalDraft === 'string' ? parsed.journalDraft : '',
+      actualMinutes:
+        typeof parsed.actualMinutes === 'number'
+          ? Math.max(0, Math.min(1440, Math.round(parsed.actualMinutes)))
+          : initial.actualMinutes,
     };
   } catch {
     return initial;
-  }
-}
-
-function restoreJournal(value: string | null): JournalEntry[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
   }
 }
 
@@ -489,14 +566,15 @@ function getRemainingSeconds(
   return progress.timerRemainingSeconds ?? activity.durationSeconds;
 }
 
-function getDayKey() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function formatTimer(seconds: number) {
   const safe = Math.max(0, Math.ceil(seconds));
   return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+}
+
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours > 0 ? `${hours}h ${String(remainder).padStart(2, '0')}m` : `${remainder}m`;
 }
 
 function formatEntryDate(timestamp: number) {
@@ -510,6 +588,7 @@ function getIncompleteLabel(type: string) {
   if (type === 'timer') return 'FINISH THE SESSION';
   if (type === 'counter') return 'REACH THE TARGET';
   if (type === 'journal') return 'WRITE YOUR CHECK-IN';
+  if (type === 'limitJournal') return 'LOG TIME OR REFLECT';
   return 'FINISH THE CHECKLIST';
 }
 
@@ -610,6 +689,10 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   counterValue: { color: '#FFFFFF', fontSize: 66, lineHeight: 72, fontWeight: '900' },
+  limitCard: { alignItems: 'center', backgroundColor: '#171B27', borderWidth: 1, borderColor: '#2A3040', borderRadius: 24, marginTop: 22, padding: 22 },
+  limitValue: { color: '#FFFFFF', fontSize: 44, lineHeight: 52, fontWeight: '900' },
+  overage: { textAlign: 'center', fontSize: 11, fontWeight: '900', letterSpacing: 1.1, marginTop: 18, marginBottom: 12 },
+  underLimit: { color: '#67D7B1', textAlign: 'center', fontSize: 12, lineHeight: 18, marginTop: 17 },
   counterTarget: { color: '#858DA0', fontSize: 10, fontWeight: '900', letterSpacing: 1.3 },
   counterActions: { flexDirection: 'row', gap: 12, marginTop: 22 },
   counterButton: {

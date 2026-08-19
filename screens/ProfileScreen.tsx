@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -26,6 +25,9 @@ import { useGame } from '../state/GameContext';
 import { useAuth } from '../state/AuthContext';
 import { useMusic } from '../state/MusicContext';
 import GameIcon from '../components/GameIcon';
+import AccountAccessModal from '../components/AccountAccessModal';
+import AvatarPortrait from '../components/AvatarPortrait';
+import AvatarCustomizer from '../components/AvatarCustomizer';
 
 const statLabels: readonly { id: StatName; label: string }[] = [
   { id: 'strength', label: 'Strength' },
@@ -38,6 +40,7 @@ const statLabels: readonly { id: StatName; label: string }[] = [
 export default function ProfileScreen() {
   const {
     appearanceId,
+    avatarCustomization,
     characterClass,
     characterName,
     completedQuestIds,
@@ -50,10 +53,12 @@ export default function ProfileScreen() {
     stats,
     totalXp,
     unlockedSkillIds,
+    updateCharacter,
   } = useGame();
   const {
+    deleteOnlineAccount,
     errorMessage: authError,
-    sendEmailLink,
+    signOut,
     status: authStatus,
     user,
   } = useAuth();
@@ -77,8 +82,9 @@ export default function ProfileScreen() {
   ).length;
   const [showGearLocker, setShowGearLocker] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [email, setEmail] = useState('');
-  const [emailSent, setEmailSent] = useState(false);
+  const [showCustomizer, setShowCustomizer] = useState(false);
+  const [customizationDraft, setCustomizationDraft] = useState(avatarCustomization);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useFocusEffect(useCallback(() => playTrack('sanctuary'), [playTrack]));
 
@@ -101,6 +107,24 @@ export default function ProfileScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Reset', style: 'destructive', onPress: resetProgress },
+      ],
+    );
+  }
+
+  function confirmOnlineAccountDeletion() {
+    Alert.alert(
+      'Delete online account?',
+      'This permanently removes your online identity, friends, party, chat, and raid records. Your local character progress remains on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: () => {
+            setDeletingAccount(true);
+            void deleteOnlineAccount().finally(() => setDeletingAccount(false));
+          },
+        },
       ],
     );
   }
@@ -133,7 +157,19 @@ export default function ProfileScreen() {
             <Text style={styles.auraLabel}>{APPEARANCES[appearanceId].name.toUpperCase()} AURA</Text>
             <Text style={[styles.gearLabel, { color: equippedGear.accent }]}>{equippedGear.name.toUpperCase()}</Text>
           </View>
+          <View style={styles.portraitBadge}>
+            <AvatarPortrait customization={avatarCustomization} size={72} />
+          </View>
         </View>
+        <Pressable
+          style={styles.customizeButton}
+          onPress={() => {
+            setCustomizationDraft(avatarCustomization);
+            setShowCustomizer(true);
+          }}
+        >
+          <Text style={styles.customizeButtonText}>CUSTOMIZE FACE & HAIR</Text>
+        </Pressable>
 
         <View style={styles.xpCard}>
           <View style={styles.xpLabels}>
@@ -276,7 +312,37 @@ export default function ProfileScreen() {
           </Pressable>
         )}
 
+        {(authStatus === 'signedOut' || authStatus === 'error') && (
+          <Pressable style={styles.accountButton} onPress={() => setShowAccount(true)}>
+            <Text style={styles.accountButtonText}>SIGN IN TO SAVED ACCOUNT</Text>
+          </Pressable>
+        )}
+
         {storageError && <Text style={styles.storageError}>{storageError}</Text>}
+
+        {authStatus === 'authenticated' && (
+          <>
+            {!user?.is_anonymous && (
+              <Pressable style={styles.signOutButton} onPress={() => void signOut()}>
+                <Text style={styles.signOutText}>SIGN OUT</Text>
+              </Pressable>
+            )}
+            <Pressable
+              style={styles.deleteAccountButton}
+              onPress={confirmOnlineAccountDeletion}
+              disabled={deletingAccount}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: deletingAccount }}
+            >
+              <Text style={styles.deleteAccountText}>
+                {deletingAccount ? 'DELETING ONLINE ACCOUNT…' : 'DELETE ONLINE ACCOUNT'}
+              </Text>
+            </Pressable>
+            {authError && !showAccount && (
+              <Text style={styles.accountActionError}>{authError}</Text>
+            )}
+          </>
+        )}
 
         <Pressable style={styles.resetButton} onPress={confirmReset} accessibilityRole="button">
           <Text style={styles.resetText}>RESET LOCAL DATA</Text>
@@ -323,48 +389,36 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      <Modal
+      <AccountAccessModal
         visible={showAccount}
+        mode={user?.is_anonymous ? 'link' : 'signIn'}
+        onClose={() => setShowAccount(false)}
+      />
+      <Modal
+        visible={showCustomizer}
         transparent
-        animationType="fade"
-        onRequestClose={() => setShowAccount(false)}
+        animationType="slide"
+        onRequestClose={() => setShowCustomizer(false)}
       >
         <View style={styles.accountBackdrop}>
-          <View style={styles.accountModal}>
-            <Text style={styles.modalEyebrow}>ACCOUNT RECOVERY</Text>
-            <Text style={styles.modalTitle}>Link your email</Text>
-            <Text style={styles.accountDescription}>
-              Guest accounts are tied to this installation. Link an email so
-              your friends and party can survive a reinstall or new phone.
-            </Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              placeholder="you@example.com"
-              placeholderTextColor="#626A7C"
-              style={styles.accountInput}
-            />
-            {(authError || emailSent) && (
-              <Text style={emailSent ? styles.accountSuccess : styles.storageError}>
-                {emailSent
-                  ? 'Verification sent. Open the link on this device.'
-                  : authError}
-              </Text>
-            )}
+          <View style={styles.customizerModal}>
+            <Text style={styles.modalEyebrow}>CHARACTER APPEARANCE</Text>
+            <Text style={styles.modalTitle}>Make it yours</Text>
+            <View style={styles.customizerPreview}>
+              <AvatarPortrait customization={customizationDraft} size={118} />
+            </View>
+            <AvatarCustomizer value={customizationDraft} onChange={setCustomizationDraft} />
             <Pressable
-              style={styles.accountConfirm}
-              onPress={() =>
-                void sendEmailLink(email).then((sent) => setEmailSent(sent))
-              }
-              disabled={!email.includes('@')}
+              style={styles.accountButton}
+              onPress={() => {
+                updateCharacter(characterName, appearanceId, customizationDraft);
+                setShowCustomizer(false);
+              }}
             >
-              <Text style={styles.accountButtonText}>SEND VERIFICATION</Text>
+              <Text style={styles.accountButtonText}>SAVE APPEARANCE</Text>
             </Pressable>
-            <Pressable onPress={() => setShowAccount(false)}>
-              <Text style={styles.accountClose}>CLOSE</Text>
+            <Pressable onPress={() => setShowCustomizer(false)}>
+              <Text style={styles.accountClose}>CANCEL</Text>
             </Pressable>
           </View>
         </View>
@@ -413,6 +467,11 @@ function GearOption({
         <Text style={styles.gearPart}>ARMOR · {gear.armorName}</Text>
         <Text style={styles.gearPart}>WEAPON · {gear.weaponName}</Text>
         <Text style={styles.gearDescription}>{gear.description}</Text>
+        {gear.moveSet && (
+          <Text style={styles.gearMoves}>
+            MOVES · {gear.moveSet.actions.quick.name} · {gear.moveSet.actions.power.name} · {gear.moveSet.actions.focus.name}
+          </Text>
+        )}
         <Text style={[styles.gearBonus, { color: gear.accent }]}>{gear.bonusText}</Text>
         <Pressable
           style={[
@@ -474,11 +533,14 @@ const styles = StyleSheet.create({
   heroGlow: { position: 'absolute', width: 220, height: 220, borderRadius: 110, opacity: 0.15, left: 18, top: 36 },
   heroImage: { position: 'absolute', width: '72%', height: 285, left: -5, top: 8 },
   heroDetails: { position: 'absolute', right: 17, top: 95, alignItems: 'flex-end' },
+  portraitBadge: { position: 'absolute', right: 16, top: 15, borderRadius: 38, borderWidth: 2, borderColor: '#FFFFFF44', overflow: 'hidden' },
   classLabel: { fontSize: 11, fontWeight: '900', letterSpacing: 1.5 },
   levelLabel: { color: '#FFFFFF', fontSize: 24, fontWeight: '900', marginTop: 5 },
   formLabel: { fontSize: 8, fontWeight: '900', letterSpacing: 0.55, marginTop: 6, maxWidth: 150, textAlign: 'right' },
   auraLabel: { color: '#7F8799', fontSize: 8, fontWeight: '900', letterSpacing: 0.7, marginTop: 6 },
   gearLabel: { fontSize: 8, fontWeight: '900', letterSpacing: 0.7, marginTop: 6, maxWidth: 130, textAlign: 'right' },
+  customizeButton: { alignSelf: 'flex-end', paddingVertical: 10, paddingHorizontal: 4 },
+  customizeButtonText: { color: '#9B94FF', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   xpCard: { backgroundColor: '#151827', borderWidth: 1, borderColor: '#272B3A', borderRadius: 15, padding: 13, marginTop: 11 },
   xpLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   xpTitle: { color: '#FFFFFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
@@ -539,6 +601,7 @@ const styles = StyleSheet.create({
   gearName: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginTop: 3 },
   gearPart: { color: '#A2A8B7', fontSize: 8, fontWeight: '800', marginTop: 5 },
   gearDescription: { color: '#747C90', fontSize: 9, lineHeight: 13, marginTop: 7 },
+  gearMoves: { color: '#A9AFBE', fontSize: 7, lineHeight: 11, fontWeight: '800', marginTop: 7 },
   gearBonus: { fontSize: 8, fontWeight: '900', marginTop: 7 },
   equipButton: { minHeight: 34, borderRadius: 9, backgroundColor: '#635BFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, marginTop: 10 },
   equippedButton: { backgroundColor: '#294F42' },
@@ -569,11 +632,18 @@ const styles = StyleSheet.create({
   accountButtonText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   accountBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,5,10,0.86)', padding: 22 },
   accountModal: { width: '100%', maxWidth: 390, borderRadius: 22, borderWidth: 1, borderColor: '#34395A', backgroundColor: '#151827', padding: 20 },
+  customizerModal: { width: '100%', maxWidth: 430, maxHeight: '92%', borderRadius: 22, borderWidth: 1, borderColor: '#34395A', backgroundColor: '#151827', padding: 20 },
+  customizerPreview: { alignItems: 'center', marginVertical: 17 },
   accountDescription: { color: '#9097A9', fontSize: 11, lineHeight: 17, marginTop: 8 },
   accountInput: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: '#34394A', backgroundColor: '#10131D', color: '#FFFFFF', paddingHorizontal: 13, marginTop: 16 },
   accountConfirm: { minHeight: 46, borderRadius: 12, backgroundColor: '#635BFF', alignItems: 'center', justifyContent: 'center', marginTop: 14 },
   accountSuccess: { color: '#54D68A', fontSize: 10, marginTop: 9 },
   accountClose: { color: '#9299AA', fontSize: 9, fontWeight: '900', textAlign: 'center', paddingTop: 16 },
+  signOutButton: { minHeight: 42, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  signOutText: { color: '#9B94FF', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   resetButton: { height: 48, borderWidth: 1, borderColor: '#61383D', borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 22 },
   resetText: { color: '#FF7770', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  deleteAccountButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
+  deleteAccountText: { color: '#B56B73', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  accountActionError: { color: '#FF9EAD', fontSize: 9, lineHeight: 14, textAlign: 'center' },
 });

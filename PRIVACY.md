@@ -18,12 +18,17 @@ measurements.
 When a player explicitly enables online play, Supabase stores an account ID,
 optional email, display name, handle, class and appearance, friend requests and
 friendships, party membership and invites, party chat, presence/heartbeat state,
-and raid lobby/result metadata. Row-level security limits social data to the
-authenticated users and party members defined by the migration.
+raid actions and rewards, blocked-player records, and player-submitted content
+reports. Row-level security limits social data to the authenticated users and
+party members defined by the migrations. Chat messages are visible only to the
+party that created them. Reports are visible only to the reporting player and
+backend operators.
 
 The current app has no analytics or advertising SDK. A public release still
-needs an in-app account/data deletion flow and a defined retention policy for
-online records.
+needs a published retention policy for moderation records. Players can delete
+their online account from Profile > Settings; the authenticated delete-account
+service removes the Supabase Auth user and cascading social records. Local game
+progress remains until the player separately chooses Reset Local Data.
 
 ## Platform access
 

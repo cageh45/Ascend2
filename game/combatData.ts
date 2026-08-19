@@ -1,4 +1,5 @@
 import type { CharacterClassName } from './gameData';
+import type { GearMoveSet } from './gearData';
 
 export type CombatVfx = 'steel' | 'arcane' | 'chi' | 'arrow';
 
@@ -251,3 +252,28 @@ export const CLASS_COMBAT_KITS: Record<CharacterClassName, ClassCombatKit> = {
     ],
   },
 };
+
+export function getCombatKit(
+  characterClass: CharacterClassName,
+  moveSet?: GearMoveSet,
+): ClassCombatKit {
+  const base = CLASS_COMBAT_KITS[characterClass];
+  if (!moveSet) return base;
+  return {
+    identity: moveSet.identity,
+    actions: base.actions.map((action) => {
+      const override = moveSet.actions[action.id];
+      return {
+        ...action,
+        name: override.name,
+        icon: override.icon,
+        damageMin: Math.round(action.damageMin * (override.damageMultiplier ?? 1)),
+        damageMax: Math.round(action.damageMax * (override.damageMultiplier ?? 1)),
+        healing: Math.round(action.healing * (override.healingMultiplier ?? 1)),
+        energyCost: Math.max(0, action.energyCost + (override.energyCostDelta ?? 0)),
+        energyGain: Math.max(0, action.energyGain + (override.energyGainDelta ?? 0)),
+        guardPercent: Math.max(0, action.guardPercent + (override.guardDelta ?? 0)),
+      };
+    }) as [CoreCombatAction, CoreCombatAction, CoreCombatAction],
+  };
+}

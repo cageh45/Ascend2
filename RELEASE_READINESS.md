@@ -12,7 +12,10 @@
   checklists, and private journal entries, with no health or screen-time access.
 - Optional Supabase authentication, relational schema, row-level security,
   realtime subscriptions, private party presence, persistent party chat,
-  friend/party RPCs, and four-player raid ready checks.
+  friend/party RPCs, player blocking/reporting, four-player raid ready checks,
+  server-authoritative boss damage, and verified per-dungeon daily rewards.
+- In-app online-account deletion backed by a JWT-protected Edge Function; local
+  progress has a separate destructive reset.
 - Runtime error recovery and visible local-storage failure states.
 - No generated health metrics, seeded friend identities, scripted chat replies,
   or scripted party-ready events.
@@ -27,26 +30,22 @@
 2. **Provision the backend.** Create the production Supabase project, push the
    migration, configure redirect URLs, anonymous-auth abuse protection, backups,
    email delivery, rate limits, and the two public EAS environment variables.
-3. **Make progression server-authoritative.** Online raid lobbies and unanimous
-   clear reporting are supported, but combat actions and quest rewards still run
-   on clients. Online raid XP is deliberately zero until a trusted server action
-   processor validates attacks, boss HP, quest evidence, and rewards.
-4. **Add production operations.** Configure crash reporting, support/contact
-   routes, in-app account/data deletion, privacy-policy and terms URLs, release
-   signing, moderation/reporting, and recovery procedures.
+3. **Choose quest trust policy.** Co-op boss damage and raid rewards are
+   server-authoritative. Daily fitness quests intentionally use player-entered
+   evidence because this edition has no HealthKit or screen-time access; decide
+   whether that honor-system model is acceptable for future competitive modes.
+4. **Add production operations.** Configure crash reporting, a staffed
+   support/contact route, privacy-policy and terms URLs, release signing,
+   moderation review procedures, retention rules, and recovery playbooks.
 5. **Complete device QA.** Test timers through app background/foreground cycles,
    counters, journals, accessibility, small/large-screen, offline, upgrade,
    interruption, battery, and store-review flows on real devices.
 
 ## Known dependency finding
 
-`npm audit --omit=dev` currently reports 22 advisories (10 moderate, 12 high),
-mostly through the Expo SDK 54/React Native build toolchain (`metro`, `postcss`,
-`image-size`, and `xcode`/`uuid`). The audit's automated remediation upgrades
-Expo to SDK 57, which is outside this
-project's required SDK and is not safe to force. Recheck the supported Expo 54
-patch line before submission and plan a tested SDK upgrade; do not run
-`npm audit fix --force` on this branch.
+Re-run `npm audit --omit=dev` before submission. Do not use
+`npm audit fix --force` when its remediation crosses the project’s required Expo
+SDK 54 compatibility boundary; plan and device-test an SDK upgrade instead.
 
 ## Required verification commands
 

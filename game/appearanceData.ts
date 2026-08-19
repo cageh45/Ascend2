@@ -6,6 +6,58 @@ export const APPEARANCE_IDS = ['violet', 'ember', 'frost'] as const;
 
 export type AppearanceId = (typeof APPEARANCE_IDS)[number];
 
+export const EYE_STYLES = ['round', 'focused', 'soft'] as const;
+export const NOSE_STYLES = ['small', 'straight', 'wide'] as const;
+export const HAIR_STYLES = ['short', 'swept', 'tied', 'curls'] as const;
+export const HAIR_COLORS = ['midnight', 'brown', 'blonde', 'crimson', 'silver'] as const;
+export const SKIN_TONES = ['porcelain', 'light', 'medium', 'deep', 'ebony'] as const;
+
+export type EyeStyle = (typeof EYE_STYLES)[number];
+export type NoseStyle = (typeof NOSE_STYLES)[number];
+export type HairStyle = (typeof HAIR_STYLES)[number];
+export type HairColor = (typeof HAIR_COLORS)[number];
+export type SkinTone = (typeof SKIN_TONES)[number];
+
+export type AvatarCustomization = {
+  eyeStyle: EyeStyle;
+  noseStyle: NoseStyle;
+  hairStyle: HairStyle;
+  hairColor: HairColor;
+  skinTone: SkinTone;
+};
+
+export const DEFAULT_AVATAR_CUSTOMIZATION: AvatarCustomization = {
+  eyeStyle: 'focused',
+  noseStyle: 'straight',
+  hairStyle: 'short',
+  hairColor: 'midnight',
+  skinTone: 'medium',
+};
+
+export const HAIR_COLOR_VALUES: Record<HairColor, string> = {
+  midnight: '#17192B',
+  brown: '#65422F',
+  blonde: '#D7B46A',
+  crimson: '#8E3447',
+  silver: '#C8CDDA',
+};
+
+export const SKIN_TONE_VALUES: Record<SkinTone, string> = {
+  porcelain: '#F6D8C8',
+  light: '#E8BFA7',
+  medium: '#C98E69',
+  deep: '#8C5A43',
+  ebony: '#54372F',
+};
+
+export const AVATAR_OPTION_LABELS = {
+  eyeStyle: { round: 'Round', focused: 'Focused', soft: 'Soft' },
+  noseStyle: { small: 'Small', straight: 'Straight', wide: 'Wide' },
+  hairStyle: { short: 'Short', swept: 'Swept', tied: 'Tied', curls: 'Curls' },
+  hairColor: { midnight: 'Midnight', brown: 'Brown', blonde: 'Blonde', crimson: 'Crimson', silver: 'Silver' },
+  skinTone: { porcelain: 'Porcelain', light: 'Light', medium: 'Medium', deep: 'Deep', ebony: 'Ebony' },
+} as const;
+
 type AppearanceDefinition = {
   name: string;
   description: string;

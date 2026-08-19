@@ -1,5 +1,134 @@
-import type { CoreCombatAction } from './combatData';
+import {
+  CLASS_COMBAT_KITS,
+  getCombatKit,
+  type CoreCombatAction,
+} from './combatData';
+import type { CharacterClassName } from './gameData';
+import type { GearMoveSet } from './gearData';
 import type { RaidBossId } from './raidData';
+
+export type GearMoveBalanceReport = {
+  damageRatio: number;
+  healingRatio: number;
+  netEnergyDelta: number;
+  guardDelta: number;
+  issues: string[];
+};
+
+const MOVE_SET_DAMAGE_LIMIT = 1.07;
+const MOVE_SET_HEALING_LIMIT = 1.18;
+const MOVE_SET_ENERGY_ADVANTAGE_LIMIT = 6;
+const MOVE_SET_GUARD_ADVANTAGE_LIMIT = 0.12;
+const SINGLE_ACTION_DAMAGE_LIMIT = 1.15;
+const SINGLE_ACTION_HEALING_LIMIT = 1.25;
+
+function getRepresentativeRotation(
+  characterClass: CharacterClassName,
+  moveSet?: GearMoveSet,
+) {
+  const kit = moveSet
+    ? getCombatKit(characterClass, moveSet)
+    : CLASS_COMBAT_KITS[characterClass];
+  const [quick, power, focus] = kit.actions;
+  const powerMechanicMultiplier =
+    characterClass === 'Scholar'
+      ? 1.25
+      : characterClass === 'Ranger'
+        ? 1.35
+        : 1;
+  const averageDamage = (action: CoreCombatAction) =>
+    (action.damageMin + action.damageMax) / 2;
+
+  return {
+    // Two setup attacks, one class-mechanic power attack, and one focus action.
+    damage:
+      averageDamage(quick) * 2 +
+      averageDamage(power) * powerMechanicMultiplier,
+    healing: quick.healing * 2 + power.healing + focus.healing,
+    netEnergy:
+      quick.energyGain * 2 +
+      power.energyGain +
+      focus.energyGain -
+      quick.energyCost * 2 -
+      power.energyCost -
+      focus.energyCost,
+    guard: quick.guardPercent * 2 + power.guardPercent + focus.guardPercent,
+  };
+}
+
+/**
+ * Compares an alternate gear move set with its class's base four-action loop.
+ * The limits intentionally allow a focused sidegrade, but reject excessive
+ * burst, sustain, resource generation, or a loadout that improves everything.
+ */
+export function auditGearMoveSetBalance(
+  characterClass: CharacterClassName,
+  moveSet: GearMoveSet,
+): GearMoveBalanceReport {
+  const base = getRepresentativeRotation(characterClass);
+  const alternate = getRepresentativeRotation(characterClass, moveSet);
+  const damageRatio = alternate.damage / base.damage;
+  const healingRatio = base.healing > 0 ? alternate.healing / base.healing : 1;
+  const netEnergyDelta = alternate.netEnergy - base.netEnergy;
+  const guardDelta = alternate.guard - base.guard;
+  const issues: string[] = [];
+  const baseActions = CLASS_COMBAT_KITS[characterClass].actions;
+  const alternateActions = getCombatKit(characterClass, moveSet).actions;
+
+  alternateActions.forEach((action, index) => {
+    const baseAction = baseActions[index];
+    if (
+      baseAction.damageMax > 0 &&
+      action.damageMax / baseAction.damageMax > SINGLE_ACTION_DAMAGE_LIMIT
+    ) {
+      issues.push(
+        `${action.name} deals over 15% more damage than its base action`,
+      );
+    }
+    if (
+      baseAction.healing > 0 &&
+      action.healing / baseAction.healing > SINGLE_ACTION_HEALING_LIMIT
+    ) {
+      issues.push(`${action.name} heals over 25% more than its base action`);
+    }
+  });
+
+  if (damageRatio > MOVE_SET_DAMAGE_LIMIT) {
+    issues.push(
+      `representative damage is ${Math.round((damageRatio - 1) * 100)}% above the base kit`,
+    );
+  }
+  if (healingRatio > MOVE_SET_HEALING_LIMIT) {
+    issues.push(
+      `representative healing is ${Math.round((healingRatio - 1) * 100)}% above the base kit`,
+    );
+  }
+  if (netEnergyDelta > MOVE_SET_ENERGY_ADVANTAGE_LIMIT) {
+    issues.push(`representative energy is ${netEnergyDelta} above the base kit`);
+  }
+  if (guardDelta > MOVE_SET_GUARD_ADVANTAGE_LIMIT) {
+    issues.push(
+      `representative guard is ${Math.round(guardDelta * 100)} points above the base kit`,
+    );
+  }
+
+  const noMeaningfulTradeoff =
+    damageRatio >= 1 &&
+    healingRatio >= 1 &&
+    netEnergyDelta >= 0 &&
+    guardDelta >= 0 &&
+    (damageRatio > 1.02 ||
+      healingRatio > 1.02 ||
+      netEnergyDelta > 2 ||
+      guardDelta > 0.02);
+  if (noMeaningfulTradeoff) {
+    issues.push(
+      'the alternate loop improves every measured dimension without a tradeoff',
+    );
+  }
+
+  return { damageRatio, healingRatio, netEnergyDelta, guardDelta, issues };
+}
 
 export type BossPhase = 1 | 2 | 3;
 export type BossIntentKind = 'strike' | 'heavy' | 'drain' | 'fortify';
